@@ -129,7 +129,7 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
       // thin smoke barely shows and thick smoke never quite closes: edges are a long fade, not a line
       const a0 = float(1).sub(exp(d.mul(d).div(d.add(.18)).mul(-L.k))).mul(.94);
       // and along that fade the smoke breaks into drifting strands
-      const strand = texture3D(noise, vec3(uv.x.mul(5).add(L.d * .37), uv.y.mul(11).sub(u.time.mul(.03)), L.d * .13 + .2).add(vec3(d.mul(.6), 0, u.time.mul(.011)))).level(0).b;
+      const strand = texture3D(noise, vec3(uv.x.mul(8).add(L.d * .37), uv.y.mul(8).sub(u.time.mul(.02)), L.d * .13 + .2).add(vec3(d.mul(.6), 0, u.time.mul(.011)))).level(0).b;
       const a = a0.mul(mix(1, smoothstep(.2, .75, strand), a0.oneMinus().mul(a0).mul(3.2))).mul(smoothstep(L.d, L.d + 1.4, z));
       col.assign(mix(col, u.paper.mul(clamp(float(1.04).sub(lit.sub(d.mul(.6)).mul(.8)), .52, 1.06)).mul(L.tone), a));
     }

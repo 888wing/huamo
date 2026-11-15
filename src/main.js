@@ -39,7 +39,7 @@ async function boot() {
   const enemy = new Enemy(), fx = [], splash = buildSplash(trail.scene);
   let dealt = 0, taken = 0, warded = 0;
   // five layers of smoke between 2.6 and 18 m from the camera; the first two lie between the camera and the figure
-  const veils = await Promise.all([[1.6, 1.6, 1, .35, 60], [2.7, 2.2, 1, .6], [3.9, 2.6, 1, .75], [5.2, 2.8, 1, .85], [7.4, 3.4, .98, 1.1], [10, 3.8, .96, 1.2], [14, 4.2, .94, 1.25], [19, 4.6, .9, 1.25]]
+  const veils = await Promise.all([[1.6, 2.4, 1, .6, 60], [2.7, 3.0, 1, .85], [3.9, 3.4, 1, 1.0], [5.2, 3.6, 1, 1.05], [7.4, 3.4, .98, 1.1], [10, 3.8, .96, 1.2], [14, 4.2, .94, 1.25], [19, 4.6, .9, 1.25]]
     .map(([d, k, tone, amount, turb = 36], i) => Veil.create(gpu, i, { d, k, tone, amount, turb }))); // the nearest is thin, restless wisps right in front of the lens
   veils.forEach(v => { v.tex = external(v.A); });
   const fog = createFog(renderer, scene, camera, noise, external(sim.D0), trail.scene, external(sim.V0), veils);

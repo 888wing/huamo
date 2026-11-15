@@ -7,6 +7,7 @@ struct Params {
   c: vec4f, // camera height, layer distance, tan(half vertical fov), aspect
   f: vec4f, // camera forward.y, up.y, right.y, altitude below which smoke gathers
   g: vec4f, // turbulence, lift, splat count, seed
+  h: vec4f, // how far this layer has scrolled in total (texels): keeps the smoke's shapes attached to the layer
   s: array<Splat, 10>,
 }
 @group(0) @binding(0) var<uniform> P_: Params;
@@ -17,6 +18,13 @@ struct Params {
 @group(0) @binding(5) var aO: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(6) var pO: texture_storage_2d<rgba16float, write>;
 
+// smoke-shaped texture: layered soft noise, bent by itself, so the layer is made of puffs and gaps rather than a flat sheet
+fn h2(p: vec2f) -> f32 { return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453); }
+fn vn(p: vec2f) -> f32 {
+  let i = floor(p); let f = fract(p); let u = f * f * (3. - 2. * f);
+  return mix(mix(h2(i), h2(i + vec2f(1., 0.)), u.x), mix(h2(i + vec2f(0., 1.)), h2(i + vec2f(1., 1.)), u.x), u.y);
+}
+fn fbm(p: vec2f) -> f32 { var a = .5; var s = 0.; var q = p; for (var i = 0; i < 4; i++) { s += a * vn(q); q = q * 2.03 + 7.1; a *= .5; } return s; }
 fn at(t: texture_2d<f32>, p: vec2i) -> vec4f { return textureLoad(t, clamp(p, vec2i(0), vec2i(textureDimensions(t)) - 1), 0); }
 
 // carry everything along the flow (and along with the camera), then feed, stir and push
@@ -32,7 +40,8 @@ fn at(t: texture_2d<f32>, p: vec2i) -> vec4f { return textureLoad(t, clamp(p, ve
   let ndc = pos / size * 2. - 1.;
   let y = P_.c.x + P_.c.y * (P_.f.x + ndc.x * P_.c.z * P_.c.w * P_.f.z - ndc.y * P_.c.z * P_.f.y);
   let q = pos * .017 + P_.g.w;
-  let clump = .55 + .45 * sin(q.x * 1.3 + t * .09) * sin(q.y * 2.1 - t * .06 + q.x * .7);
+  let w = (pos - P_.h.xy) * .012 + P_.g.w + vec2f(t * .014, -t * .007);
+  let clump = smoothstep(.36, .7, fbm(w + .7 * fbm(w * 1.8 + 3.1))) * 1.7; // dense cores, thin skirts, clear gaps
   d += (smoothstep(P_.f.w, P_.f.w - 2.4, y) * clump * P_.b.z - d) * P_.b.w * dt;
   // billowing: a slowly changing shearing flow, stronger where there is smoke, plus a little lift
   v += P_.g.x * d * dt * vec2f(cos(q.y * 2.3 + t * .7) + .6 * cos(q.y * 4.7 - t * 1.1 + q.x), -cos(q.x * 2.1 - t * .6) - .6 * cos(q.x * 4.3 + t * .9 + q.y));
