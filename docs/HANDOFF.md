@@ -226,6 +226,17 @@ and foreground smoke dense enough to hide part of the figure.
 - Near layers: more smoke, and it gathers up to 5-7 m altitude instead of 4.4 m, so it crosses the figure.
   A first setting hid the figure completely and was eased by about a third.
 
+Round 17 (2026-11-15): smoke parked. Owner asked for refined body motion, weight when blades meet, and a sword-light
+shape with variation (it read as a rectangular brush stroke).
+
+- Sword light (`buildTrail` in `stage.js`, `arc()` in `main.js`): a crescent between a point partway down the blade and
+  the tip — thin at both ends, widest at the snap — crisp on the outer edge, feathered inside, drying into streaks.
+  The stroke scene's green channel carries a white light along the fresh outer edge; red is ink coverage.
+- Body (`figure.js`): the stroke has three poses blended by phase: gather (crouch, sword arm drawn back and bent,
+  torso wound past the start), snap (hips lead, lunge, wrist breaks), and rising out; the head tracks the target.
+- Steel on steel (`main.js`, `fog.js`): clash and parry stop time for 13 frames, throw 110 droplets, blink the
+  picture white (`u.flash`) and punch the lens in by 6 degrees of field of view, both decaying within a few frames.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

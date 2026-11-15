@@ -165,10 +165,11 @@ export function buildTrail(noise, into, N = 22) {
   g.setAttribute('side', new THREE.BufferAttribute(Float32Array.from({ length: N * 2 }, (_, i) => i % 2 ? -1 : 1), 1));
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false, depthTest: false });
   const a = attribute('age', 'float'), n = texture3D(noise, positionWorld.mul(vec3(.35, 3.2, .35))).b;
-  m.colorNode = vec3(1, 1, 1);
   // soft at both edges, streaked along its length like bristles, and running dry as it ages
   const sd = attribute('side', 'float'), bristle = texture3D(noise, vec3(sd.mul(2.2), positionWorld.x.mul(.07), positionWorld.z.mul(.07))).g;
-  m.opacityNode = smoothstep(1, .2, a).mul(smoothstep(1, .45, sd.abs())).mul(smoothstep(a.mul(.8).add(.12), a.mul(.8).add(.4), n.mul(.5).add(bristle.mul(.7))));
+  m.opacityNode = smoothstep(1, .2, a).mul(smoothstep(-1, -.2, sd).mul(smoothstep(1, .9, sd))).mul(smoothstep(a.mul(.8).add(.12), a.mul(.8).add(.4), n.mul(.5).add(bristle.mul(.7))));
+  // red = ink coverage; green = the white light along the leading outer edge, gone almost at once
+  m.colorNode = vec3(1, smoothstep(.45, .9, sd).mul(a.oneMinus().pow(3)), 0);
   const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.visible = false; scene.add(mesh);
   let live = 0;
   return {
@@ -177,7 +178,7 @@ export function buildTrail(noise, into, N = 22) {
     update(dt, tip, w) {
       pos.copyWithin(6, 0, (N - 1) * 6); age.copyWithin(2, 0, (N - 1) * 2);
       for (let i = 2; i < N * 2; i++) age[i] = Math.min(1, age[i] + dt / .5);
-      if (tip) { pos.set([tip[0], tip[1] + w, tip[2]], 0); pos.set([tip[0], tip[1] - w, tip[2]], 3); age[0] = age[1] = 0; live = N; }
+      if (tip) { pos.set(tip, 0); pos.set(w, 3); age[0] = age[1] = 0; live = N; } // tip = outer edge, w = inner edge of the crescent
       else { pos.copyWithin(0, 6, 12); age[0] = age[1] = 1; live--; }
       mesh.visible = live > 0;
       g.attributes.position.needsUpdate = true; g.attributes.age.needsUpdate = true;
@@ -187,7 +188,7 @@ export function buildTrail(noise, into, N = 22) {
 
 // Ink thrown off by a blow: droplets that fly, fall and shrink. They sit in the stroke scene, so they land on top of the fog.
 export function buildSplash(scene, N = 160) {
-  const m = new THREE.MeshBasicNodeMaterial({ depthTest: false, depthWrite: false }); m.colorNode = vec3(1, 1, 1);
+  const m = new THREE.MeshBasicNodeMaterial({ depthTest: false, depthWrite: false }); m.colorNode = vec3(1, 0, 0); // red channel only: ink, not light
   const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 6, 4), m, N); mesh.frustumCulled = false; scene.add(mesh);
   const p = new Float32Array(N * 3), v = new Float32Array(N * 3), life = new Float32Array(N), size = new Float32Array(N), M = new THREE.Matrix4();
   let next = 0;

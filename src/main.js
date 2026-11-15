@@ -6,7 +6,7 @@ import { FOG_TOP, height, terrainTexture } from './world.js';
 import { buildStage, buildTrail, buildSplash, noiseTexture, external, PAPER } from './stage.js';
 import { buildBeasts } from './beasts.js';
 import { createFog } from './fog.js';
-import { Player, Enemy, spar, FORMS, HP } from './player.js';
+import { Player, Enemy, spar, swing, FORMS, HP } from './player.js';
 import { Figure } from './figure.js';
 import { Veil, VW, VH } from './veil.js';
 import atlasUrl from '../assets/smoke_atlas.jpg';
@@ -99,7 +99,7 @@ async function boot() {
 
   const demo = DEMOS[q.get('demo')] ?? null, override = { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false };
   const DT = sim.par.dt;
-  let hold = 0, clock = 0;
+  let hold = 0, clock = 0, flash = 0, kick = 0;
   const tgt = new THREE.Vector3(), eye = new THREE.Vector3(), want = new THREE.Vector3();
   let camReady = false;
 
@@ -114,7 +114,9 @@ async function boot() {
       const big = ev.kind === 'kill' || ev.kind === 'clash' || ev.kind === 'parry' || ev.kind === 'down';
       if (ev.kind === 'dodge') { warded++; continue; }
       const away = ev.kind === 'taken' || ev.kind === 'down' ? [player.p[0] - enemy.p[0], player.p[2] - enemy.p[2]] : [enemy.p[0] - player.p[0], enemy.p[2] - player.p[2]], al = Math.hypot(away[0], away[1]) || 1;
-      splash.burst(ev.at, [away[0] / al, away[1] / al], big ? 60 : 34); hold = big ? 8 : 5;
+      const steel = ev.kind === 'clash' || ev.kind === 'parry';
+      splash.burst(ev.at, [away[0] / al, away[1] / al], steel ? 110 : big ? 60 : 34); hold = steel ? 13 : big ? 8 : 5;
+      flash = Math.max(flash, steel ? 1 : big ? .45 : .22); kick = Math.max(kick, steel ? 1 : big ? .6 : .35);
       fx.push({ a: ev.at, r: big ? 2.6 : 1.9, ink: 0, div: big ? 26 : 16, life: .2, t: 0 }); // a shock that blows the fog open around the blow
       player.shake = Math.max(player.shake, big ? 1.3 : .8);
       if (ev.kind === 'taken' || ev.kind === 'down') taken++; else if (ev.kind === 'cut' || ev.kind === 'kill' || ev.kind === 'push') dealt++; else if (ev.kind === 'parry' || ev.kind === 'block') warded++;
@@ -134,9 +136,11 @@ async function boot() {
     if (f === 0) hero.update(dt, pose, camera.position); else beasts[f - 1].update(dt, pose, camera.position);
     if (shade.group.visible) shade.update(dt, { p: enemy.p, yaw: enemy.yaw, phase: enemy.phase, run: Math.min(1, Math.hypot(enemy.v[0], enemy.v[2]) / 3.6), act: enemy.actT, side: enemy.side, windup: enemy.windup, stagger: enemy.stagger / .5, fade: enemy.fade, fall: enemy.fallT, melt: enemy.meltT, eyes: true, time: t }, camera.position);
     const bl = player.blade();
-    trail.update(dt, bl && bl.b, bl ? .05 + .24 * Math.sin(Math.PI * act) ** .7 : 0);
+    // the sword's light is a crescent: thin where the stroke starts and ends, widest at the snap, reaching in from the tip
+    const arc = (b, t) => { const w = Math.sin(Math.PI * swing(t)) ** .8, k = .08 + .6 * w; return [[b.b[0], b.b[1] + .12 * w, b.b[2]], [b.b[0] + (b.a[0] - b.b[0]) * k, b.b[1] + (b.a[1] - b.b[1]) * k - .25 * w, b.b[2] + (b.a[2] - b.b[2]) * k]]; };
+    const pa = bl && arc(bl, act); trail.update(dt, pa && pa[0], pa && pa[1]);
     splash.update(dt);
-    const eb = enemy.blade(); trail2.update(dt, eb && eb.b, eb ? .05 + .24 * Math.sin(Math.PI * enemy.actT) ** .7 : 0);
+    const eb = enemy.blade(), ea = eb && arc(eb, enemy.actT); trail2.update(dt, ea && ea[0], ea && ea[1]);
 
     // ---- camera: follows with a little lag, and shakes when something big happens
     shake = Math.max(player.shake, shake * Math.exp(-7 * dt)); player.shake = 0;
@@ -188,6 +192,9 @@ async function boot() {
       v.step(vf, dt, t, [c[0] - VW / 2, c[1] - VH / 2], camInfo, splats);
     }
     vf.end(); prevPos.copy(camera.position); prevFwd.copy(fwd);
+    // a blink of white and a punch-in of the lens on impact, both gone within a few frames
+    flash *= Math.exp(-16 * DT); kick *= Math.exp(-9 * DT); fog.u.flash.value = flash * .55;
+    camera.fov = 50 - 6 * kick; camera.updateProjectionMatrix();
     fog.u.time.value = t;
     fog.u.hero.value.set(player.p[0], player.p[1] + (f < 2 ? .95 : 0), player.p[2]); fog.u.heroR.value = [1.4, 1.6, 2.4, 1.6][f];
     fog.u.hero2.value.set(enemy.p[0], enemy.mode === 'gone' ? -99 : enemy.p[1] + .95, enemy.p[2]);

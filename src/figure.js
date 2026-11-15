@@ -97,11 +97,13 @@ export class Figure {
       set(B.armR, -2.7 * k, 0, -.25); set(B.foreR, -.5 * k); set(B.armL, -.9 * k, 0, .3); twist = -s * .5 * k; hipY -= .06 * k; lean -= .12 * k;
     }
     if (t >= 0) { // the stroke: hips and chest wind through, the arm carries the sword flat, the front leg lunges
-      const e = swing(t); twist = s * (-1.15 + 2.3 * e);
-      set(B.armR, -1.5 + .25 * s * (e - .5), 0, -.1); set(B.foreR, -.12); set(B.handR, -.25);
+      const e = swing(t), gather = Math.sin(Math.PI * Math.min(1, t / .35)) * (t < .35 ? 1 : 0), snap = Math.min(1, Math.max(0, (t - .35) / .25)), out = Math.max(0, (t - .6) / .4);
+      twist = s * (-1.15 + 2.3 * e - .45 * gather);
+      set(B.armR, -1.5 + .25 * s * (e - .5) + .55 * gather + .2 * out, 0, -.1 - .3 * gather); set(B.foreR, -.12 - 1.0 * gather); set(B.handR, -.25 - .3 * snap);
+      set(B.head, -.12, -twist * .45);
       set(B.armL, .7, 0, .7); set(B.foreL, -.6);
       set(B.thighL, s > 0 ? -.75 : .5, 0, .12); set(B.shinL, s > 0 ? .8 : .3); set(B.thighR, s > 0 ? .5 : -.75, 0, -.12); set(B.shinR, s > 0 ? .3 : .8);
-      hipY -= .17; lean += .22;
+      hipY -= .15 + .12 * gather + .06 * snap - .1 * out; lean += .14 + .2 * snap + .1 * gather - .12 * out;
     }
     if (st.stagger > 0) { const k = st.stagger; lean -= .55 * k; hipY -= .08 * k; set(B.armL, -.6 * k, 0, 1.0 * k); set(B.armR, -.4 * k, 0, -1.0 * k); set(B.head, .35 * k); }
     const fall = st.fall ?? 0, melt = st.melt ?? 0, fe = fall * fall * (3 - 2 * fall);

@@ -18,7 +18,7 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     projInv: uniform(camera.projectionMatrixInverse), camWorld: uniform(camera.matrixWorld), camPos: uniform(new THREE.Vector3()),
     near: uniform(camera.near), far: uniform(camera.far), dpr: uniform(1),
     boxMin: uniform(new THREE.Vector3()), boxSize: uniform(new THREE.Vector3(1, 1, 1)),
-    kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
+    flash: uniform(0), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
     slice: uniform(0.3), sliceV: uniform(0), top: uniform(10), reach: uniform(90), fogTop: uniform(FOG_TOP),
     paper: uniform(new THREE.Color(PAPER)), ink: uniform(new THREE.Color(INK)),
     air: uniform(new THREE.Color(PAPER).lerp(new THREE.Color(INK), .26)), // the air is a grey wash, so white fog is the lightest thing in the picture
@@ -168,6 +168,8 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
 
     // the sword stroke goes on last, over the fog
     col.assign(mix(col, u.ink, strokeT.r.mul(.94).mul(keep.mul(1.25).oneMinus())));
+    col.assign(mix(col, u.paper.mul(1.1), clamp(strokeT.g.mul(1.6), 0, 1)));  // the sword's light
+    col.assign(mix(col, u.paper.mul(1.12), u.flash));                          // steel on steel: the whole picture blinks
 
     // ink settles into a few tones rather than a smooth grey ramp
     const lum = dot(col, vec3(.3, .59, .11)), ref = dot(u.paper, vec3(.3, .59, .11)), t = clamp(lum.div(ref), 0, 1.05);
