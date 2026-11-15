@@ -7,7 +7,7 @@ const browser = await puppeteer.launch({ executablePath: '/Applications/Google C
 const page = await browser.newPage(); const errs = [];
 page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 300)); });
 page.on('pageerror', e => errs.push(e.message));
-await page.goto('file://' + resolve('dist/index.html') + '?manual&dpr=1&boss&demo=' + (process.argv[3] ?? 'boss'));
+await page.goto('file://' + resolve(process.env.PAGE ?? 'dist/index.html') + '?manual&dpr=1&boss&demo=' + (process.argv[3] ?? 'boss'));
 await page.waitForFunction('window.__done === true', { timeout: 60000 });
 const secs = +(process.argv[2] ?? 60), modes = {}, log = []; let worst = 0, n = 0, prev = '', lowFoot = 1e9, highFoot = -1e9;
 for (let i = 0; i < secs * 12; i++) {

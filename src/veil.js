@@ -2,7 +2,7 @@
 import src from './veil.wgsl';
 
 export const VW = 384, VH = 216;
-const MAXS = 10;
+const MAXS = 14; // blade strips and a walking wake come first, then bodies, the giant's six parts and its blasts
 let pipes = null;
 
 export class Veil {
@@ -21,11 +21,11 @@ export class Veil {
     v.u = new Float32Array(24 + MAXS * 12); v.off = [0, 0];
     return v;
   }
-  // f: an open compute stage; scroll: [x, y] texels; cam: { y, tanY, aspect, fy, uy, ry }; splats: [{ x, y, r, w, vx, vy, den, drag }]
-  step(f, dt, time, scroll, cam, splats) {
+  // Blade strips and walking wakes carry density before the remaining splats apply forces.
+  step(f, dt, time, scroll, cam, splats, transportCount = 0) {
     const u = this.u, n = Math.min(splats.length, MAXS);
-    u.set([VW, VH, dt, time, scroll[0], scroll[1], this.amount, this.heal, cam.y, this.d, cam.tanY, cam.aspect, cam.fy, cam.uy, cam.ry, this.top, this.turb, this.lift, n, this.seed, (this.off[0] += scroll[0]), (this.off[1] += scroll[1]), 0, 0]);
-    for (let k = 0; k < n; k++) { const s = splats[k]; u.set([s.x, s.y, s.r, s.w, s.vx, s.vy, s.den, s.drag, s.x2 ?? s.x, s.y2 ?? s.y, s.split ?? 0, 0], 24 + k * 12); }
+    u.set([VW, VH, dt, time, scroll[0], scroll[1], this.amount, this.heal, cam.y, this.d, cam.tanY, cam.aspect, cam.fy, cam.uy, cam.ry, this.top, this.turb, this.lift, n, this.seed, (this.off[0] += scroll[0]), (this.off[1] += scroll[1]), Math.min(transportCount, n), 0]);
+    for (let k = 0; k < n; k++) { const s = splats[k]; u.set([s.x, s.y, s.r, s.w, s.vx, s.vy, s.den, s.drag, s.x2 ?? s.x, s.y2 ?? s.y, s.split ?? 0, s.wake ? 1 : 0], 24 + k * 12); }
     this.gpu.device.queue.writeBuffer(this.ubuf, 0, u);
     const { A, B, D, P0, P1, E0, E1, ubuf: U } = this, L = this.gpu.linear, x = VW / 8, y = VH / 8;
     f.run(pipes.advect, { 0: U, 1: L, 2: A, 5: B, 7: E0, 8: E1 }, x, y);

@@ -1,24 +1,44 @@
 // The picture: fog and ink marched at half resolution, then one full-resolution pass that draws brush lines at
 // depth edges, lets distance wash things towards paper, lays the fog over, and finishes on textured paper.
 import * as THREE from 'three/webgpu';
-import { Fn, vec2, vec3, vec4, float, uniform, texture, texture3D, screenUV, screenCoordinate, screenSize, pass, rtt, Loop, If, Break,
-  getViewPosition, perspectiveDepthToViewZ, interleavedGradientNoise, exp, max, min, length, mix, smoothstep, clamp, abs, floor, fract, dot, sin, cos, step, mod } from 'three/tsl';
+import { Fn, vec2, vec3, vec4, float, uniform, texture, texture3D, screenUV, screenCoordinate, screenSize, pass, rtt, Loop, If, Break, mrt, output,
+  getViewPosition, perspectiveDepthToViewZ, interleavedGradientNoise, exp, max, min, length, mix, smoothstep, clamp, abs, floor, fract, dot, sin, cos, step, mod, int } from 'three/tsl';
 import { PAPER, INK } from './stage.js';
 import { FOG_TOP } from './world.js';
 import { VW, VH } from './veil.js';
 
-const STEPS = 56, ZREF = 140;
+// March steps through the 3D fog. 28 is the default: against 56 the picture differs by less than 1 grey level on average
+// (48-62 dB), and a level or upward view costs 4.4 ms less at 1080p. ?steps=56 restores the old count for comparison.
+const STEPS = +(new URLSearchParams(location.search).get('steps') ?? 28), ZREF = 140;
 
-export function createFog(renderer, scene, camera, noise, den, strokes, vel, veils = [], atlas = null) {
+export function createFog(renderer, scene, camera, noise, den, strokes, vel, veils = [], atlas = null,
+  { procedural = false, seed = 0, foregroundDensity = 1.85, hero = null, shade = null, giant = null } = {}) {
   veils.forEach((L, i) => { L.i = i; L.offU = uniform(new THREE.Vector2()); });
   const scenePass = pass(scene, camera), strokeT = pass(strokes, camera).getTextureNode('output');
   const colT = scenePass.getTextureNode('output'), depT = scenePass.getTextureNode('depth');
+  scenePass.setMRT(mrt({ output, subjectMask: float(0) }).setClearColor('subjectMask', 0));
+  const subjectMask = scenePass.getTexture('subjectMask');
+  subjectMask.format = THREE.RedFormat;
+  subjectMask.type = THREE.UnsignedByteType;
+  subjectMask.minFilter = subjectMask.magFilter = THREE.NearestFilter;
+  const subjectT = scenePass.getTextureNode('subjectMask');
+  const markSubject = (figure, value) => {
+    if (!figure) return;
+    const mark = mrt({ subjectMask: float(value) });
+    figure.group.traverse(object => {
+      if (object.isMesh) object.material.mrtNode = mark;
+    });
+    figure.cloth.mesh.material.mrtNode = mark;
+  };
+  markSubject(hero, 1);
+  markSubject(shade, .5);
+  markSubject(giant, .25); // the giant uses the opponent matte at its own value: main.js raises enemyClear while it announces a blow
   // fog is thin veils, not a wall (kFog): the scene shows through and the fog's own movement becomes visible
   const u = {
     projInv: uniform(camera.projectionMatrixInverse), camWorld: uniform(camera.matrixWorld), camPos: uniform(new THREE.Vector3()),
     near: uniform(camera.near), far: uniform(camera.far), dpr: uniform(1),
     boxMin: uniform(new THREE.Vector3()), boxSize: uniform(new THREE.Vector3(1, 1, 1)),
-    flash: uniform(0), smoke: uniform(1), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
+    flash: uniform(0), smoke: uniform(1), foregroundDensity: uniform(foregroundDensity), heroClear: uniform(0), enemyClear: uniform(0), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
     slice: uniform(0.3), sliceV: uniform(0), top: uniform(10), reach: uniform(90), fogTop: uniform(FOG_TOP),
     paper: uniform(new THREE.Color(PAPER)), ink: uniform(new THREE.Color(INK)),
     air: uniform(new THREE.Color(PAPER).lerp(new THREE.Color(INK), .26)), // the air is a grey wash, so white fog is the lightest thing in the picture
@@ -93,34 +113,61 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
   // distance. Returns the smoke's colour (already weighted) and how much of the scene still shows through it.
   const smoke = Fn(() => {
     const uv = screenUV, z = zAt(uv), acc = vec3(0).toVar(), T = float(1).toVar();
-    // one cell of the smoke atlas, repeated: 0-5 puffs, 6-8 wisps, 9-10 sheets, 11 fine detail
-    const cell = (n, p) => texture(atlas, p.fract().mul(.96).add(.02).add(vec2(n % 4, Math.floor(n / 4))).div(vec2(4, 3))).level(0).r;
-    // the same, but every other repeat is mirrored: no seam can show however far the picture is enlarged
-    const cellM = (n, p) => cell(n, p.mul(.5).fract().mul(2).sub(1).abs().mul(.999));
+    // Atlas cells 0–5 are puffs, 6–8 wisps, 9–10 sheets, and 11 fine detail.
+    // The procedural bake packs independent shapes into each of the four channels.
+    const sampleCell = (index, local) => texture(atlas, local.mul(.96).add(.02).add(index).div(vec2(4, 3))).level(0);
+    const sheet = (n, p, bank) => {
+      const mirrored = p.mul(.5).fract().mul(2).sub(1).abs().mul(.999);
+      const sample = sampleCell(vec2(n % 4, Math.floor(n / 4)), mirrored);
+      return procedural ? sample.element(int(bank)) : sample.r;
+    };
     const asp2 = screenSize.x.div(screenSize.y);
+    const seedOffset = procedural ? (seed % 4093) * .109 : 0;
     const rnd = (c, k) => sin(dot(c, vec2(127.1, 311.7)).add(k)).mul(43758.5453).fract();
-    // one picture per cell of a loose lattice, each with its own size, turn, place and choice of picture; some cells stay empty
-    const scatter = (q, seed, first, count) => {
+    const scatter = (q, layerSeed, first, count) => {
+      const seed = layerSeed + seedOffset;
       const c = floor(q), f = q.fract().sub(.5);
-      const sc = mix(.56, .78, rnd(c, seed + 1)), ang = rnd(c, seed + 2).mul(6.283), cs = cos(ang), sn = sin(ang);
-      const h = f.sub(vec2(rnd(c, seed + 3).sub(.5), rnd(c, seed + 4).sub(.5)).mul(max(float(.5).sub(sc.mul(.62)), 0)).mul(2)); // however it is turned, the whole picture stays inside its own cell
-      const g = vec2(h.x.mul(cs).sub(h.y.mul(sn)), h.x.mul(sn).add(h.y.mul(cs))).div(sc).add(.5);
+      const sc = mix(procedural ? .54 : .56, procedural ? .71 : .78, rnd(c, seed + 1));
+      const ang = rnd(c, seed + 2).mul(6.283), cs = cos(ang), sn = sin(ang);
+      const offset = vec2(rnd(c, seed + 3), rnd(c, seed + 4)).sub(.5)
+        .mul(max(float(.5).sub(sc.mul(procedural ? .70 : .62)), 0)).mul(2);
+      const h = f.sub(offset);
+      const p = vec2(h.x.mul(cs).sub(h.y.mul(sn)), h.x.mul(sn).add(h.y.mul(cs))).div(sc);
+      let g = p.add(.5);
+      if (procedural) {
+        const squeeze = mix(.87, 1.16, rnd(c, seed + 8));
+        const bend = rnd(c, seed + 9).sub(.5).mul(.54);
+        g = vec2(p.x.mul(squeeze).add(p.y.mul(p.y).mul(bend)), p.y.div(squeeze)).add(.5);
+      }
       const n = floor(rnd(c, seed + 5).mul(count)).add(first);
       const inside = step(0, g.x).mul(step(g.x, 1)).mul(step(0, g.y)).mul(step(g.y, 1)).mul(step(.16, rnd(c, seed + 6)));
-      return texture(atlas, clamp(g, 0, 1).mul(.96).add(.02).add(vec2(mod(n, 4), floor(n.div(4)))).div(vec2(4, 3))).level(0).r.mul(inside);
+      const sample = sampleCell(vec2(mod(n, 4), floor(n.div(4))), clamp(g, 0, 1)).toVar();
+      if (!procedural) return sample.r.mul(inside);
+      const bank = floor(rnd(c, seed + 7).mul(4));
+      const neighbor = mod(bank.add(1), 4);
+      const shape = mix(sample.element(int(bank)), sample.element(int(neighbor)), rnd(c, seed + 10).mul(.34));
+      return shape.mul(inside).mul(mix(.86, 1.16, rnd(c, seed + 11)));
     };
     for (const L of [...veils].reverse()) {
       const s = texture(L.disp, uv).level(0);
-      const tap = o => texture(L.disp, uv.add(o)).level(0).z, e = .0045;
-      const d = s.z.mul(.4).add(tap(vec2(e, 0)).add(tap(vec2(-e, 0))).add(tap(vec2(0, e * 1.8))).add(tap(vec2(0, -e * 1.8))).mul(.15));
-      // the photographs ride on the layer: attached to it, pulled along by its flow, drifting slowly
-      // the pictures are looked up where the smoke came from, so they bend and curl exactly as the fluid carried them
+      const tap = o => texture(L.disp, uv.add(o)).level(0).z;
+      const e = .004, neighbors = tap(vec2(e, 0)).add(tap(vec2(-e, 0)))
+        .add(tap(vec2(0, e * 1.65))).add(tap(vec2(0, -e * 1.65)));
+      const blurred = s.z.mul(.64).add(neighbors.mul(.09));
+      // Keep fine gaps opened by the blade from disappearing into the compositor's filter.
+      const d = mix(blurred, min(s.z, blurred), smoothstep(.03, .45, s.w));
+      // Sample the smoke where it was before the flow displaced it.
       const p = uv.sub(L.offU).add(s.xy.div(length(s.xy).div(40).add(1)).div(vec2(VW, VH))).mul(vec2(asp2, 1)).add(vec2(L.i * .37, L.i * .61)).add(vec2(u.time.mul(.006), 0));
-      const body = cellM(9 + L.i % 2, p.mul(.4)).mul(.55).add(scatter(p.mul(.46), L.i * 17.3, 0, 6).mul(1.25)).add(scatter(p.mul(.7).add(.5), L.i * 5.1 + 40, 6, 3).mul(.55)); // pictures are drawn larger than the screen area they cover, so a whole puff outline is rarely in view
-      const fine = cellM(11, p.mul(1.15));
-      // the simulation says where the smoke is; the photographs give it body, and their fine detail eats into its edges
-      const dd = max(d.mul(body.mul(1.5).add(.3)).sub(fine.oneMinus().mul(.22).mul(max(d.oneMinus(), 0))), 0);
-      const a = float(1).sub(exp(dd.mul(dd).div(dd.add(.15)).mul(-L.k))).mul(.95).mul(smoothstep(L.d, L.d + 1.4, z));
+      const bank = (L.i + seed % 4) % 4;
+      const body = sheet(9 + L.i % 2, p.mul(.4), bank).mul(.55)
+        .add(scatter(p.mul(.46), L.i * 17.3, 0, 6).mul(1.25))
+        .add(scatter(p.mul(.7).add(.5), L.i * 5.1 + 40, 6, 3).mul(.55));
+      const fine = sheet(11, p.mul(1.15), (bank + 1) % 4);
+      const dd = max(d.mul(body.mul(1.5).add(.3)).sub(fine.oneMinus().mul(.18).mul(max(d.oneMinus(), 0))), 0);
+      const foreground = 1 - Math.min(1, Math.max(0, (L.d - 4.2) / 8.2));
+      const extinction = mix(1, u.foregroundDensity, foreground).mul(L.k);
+      const a = float(1).sub(exp(dd.mul(dd).div(dd.add(.15)).mul(extinction.negate())))
+        .mul(.95).mul(smoothstep(L.d, L.d + 1.4, z));
       const shade = clamp(float(.78).add(body.mul(.3)).sub(max(tap(vec2(-.012, -.02)).sub(d), 0).mul(.5)), .6, 1.04);
       acc.assign(mix(acc, u.paper.mul(shade).mul(L.tone), a)); T.mulAssign(a.oneMinus());
     }
@@ -161,15 +208,29 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     const wp = u.camWorld.mul(vec4(getViewPosition(uv, depT.r, u.projInv), 1)).xyz;
     // (only above the feet, so the ground under the figure is not cleared into a pale disc)
     const near = (c, r) => float(1).sub(smoothstep(r.mul(.55), r, length(wp.sub(c).mul(vec3(1, .75, 1))))).mul(smoothstep(-.88, -.6, wp.y.sub(c.y)));
-    const keep = max(near(u.hero, u.heroR), near(u.hero2, float(1.35))).mul(.8);
+    // The visibility mask follows the figure's real silhouette and respects scene occlusion.
+    // A little fog stays around the lower body while the hat, shoulders and robe emerge after a stroke.
+    const upper = smoothstep(-.40, .18, wp.y.sub(u.hero.y));
+    const playerMask = step(.75, subjectT.r);
+    const reveal = playerMask.mul(u.heroClear).mul(mix(.57, 1, upper));
+    // The same matte keeps the stagger, fall and wet ink legible inside the foreground veils.
+    // The giant (marked .25) comes through from the chest up; its legs stay sunk in the fog.
+    const giantMask = step(.1, subjectT.r).mul(step(subjectT.r, .4)), rise = mix(.3, 1, smoothstep(1.5, 5.5, wp.y.sub(u.hero.y)));
+    const opponent = clamp(subjectT.r.mul(2), 0, 1).mul(playerMask.oneMinus()).mul(mix(1, rise.mul(2), giantMask)).mul(u.enemyClear);
+    const keep = max(max(near(u.hero, u.heroR), near(u.hero2, float(1.35))).mul(.8), max(reveal, opponent).mul(.96));
     col.assign(col.mul(mix(fg.z, 1, keep)).add(u.paper.mul(fg.x.mul(keep.oneMinus()))).add(u.ink.mul(fg.y)));
 
     // the smoke layers, far to near: each is laid over whatever lies beyond its distance, so smoke passes both behind
     // and in front of things. A second tap towards the light shades each layer: thick smoke up-light puts this texel in shadow.
-    const sm = mix(vec4(0, 0, 0, 1), smokeRT.sample(uv), u.smoke); col.assign(col.mul(sm.a).add(sm.rgb));
+    const sm = smokeRT.sample(uv);
+    // Leave a little of the scene visible when several foreground veils overlap.
+    const coverage = sm.a.oneMinus();
+    const smokeLimit = min(mix(.88, .19, reveal), mix(.88, .30, opponent));
+    const smokeWeight = min(coverage, smokeLimit).div(max(coverage, .0001)).mul(u.smoke);
+    col.assign(col.mul(coverage.mul(smokeWeight).oneMinus()).add(sm.rgb.mul(smokeWeight)));
 
     // the sword stroke goes on last, over the fog
-    col.assign(mix(col, u.ink, strokeT.r.mul(.94).mul(keep.mul(1.25).oneMinus())));
+    col.assign(mix(col, u.ink, strokeT.r.mul(.94).mul(max(keep.mul(1.25).oneMinus(), 0))));
     col.assign(mix(col, u.paper.mul(1.1), clamp(strokeT.g.mul(1.6), 0, 1)));  // the sword's light
     col.assign(mix(col, u.paper.mul(1.12), u.flash));                          // steel on steel: the whole picture blinks
 

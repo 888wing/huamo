@@ -1,11 +1,12 @@
 import puppeteer from 'puppeteer-core';
+import { resolve } from 'node:path';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
   args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist', '--window-size=1280,720'], defaultViewport: { width: 1280, height: 720 } });
 const page = await browser.newPage();
 const errs = [];
 page.on('console', m => { if (m.type() === 'error' || m.type() === 'warn') errs.push(m.text().slice(0, 300)); });
 page.on('pageerror', e => errs.push('pageerror ' + e.message));
-await page.goto('file:///Users/chuisiufai/Projects/huamo/dist/index.html');
+await page.goto('file://' + resolve('dist/index.html'));
 await page.waitForFunction('window.__done === true', { timeout: 60000 });
 await new Promise(r => setTimeout(r, 1500));
 const f0 = (await page.evaluate(() => window.__state())).frame;

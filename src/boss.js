@@ -108,8 +108,10 @@ export class Giant {
   // the player's stroke against the giant. A cut on the planted hand makes it flinch; its ankles only bleed ink
   struck(pl) {
     const P = this.parts, t = pl.actT;
-    if (!P || !this.awake || pl.form !== 0 || t < .38 || t > .7 || pl.hit) return null;
-    const hand = P[this.side > 0 ? 'handL' : 'handR'], near = (o, r) => Math.hypot(o[0] - pl.p[0], o[2] - pl.p[2]) < r && Math.abs(wrap(Math.atan2(o[0] - pl.p[0], o[2] - pl.p[2]) - pl.yaw)) < 1.4;
+    if (!P || !this.awake || pl.form !== 0 || pl.hit) return null;
+    const { hitStart, hitEnd, angle } = pl.swordMove;
+    if (t < hitStart || t > hitEnd) return null;
+    const hand = P[this.side > 0 ? 'handL' : 'handR'], near = (o, r) => Math.hypot(o[0] - pl.p[0], o[2] - pl.p[2]) < r && Math.abs(wrap(Math.atan2(o[0] - pl.p[0], o[2] - pl.p[2]) - pl.yaw)) < angle;
     if (this.planted && near(hand, 4.3)) { pl.hit = true; this.flinch = 1; this.count++; return { kind: 'cut', at: [hand[0], hand[1] + .5, hand[2]], big: true }; }
     for (const k of ['footL', 'footR']) if (P[k][1] - height(P[k][0], P[k][2]) < 1.5 && near(P[k], 3.6)) { pl.hit = true; this.count++; return { kind: 'cut', at: [P[k][0], P[k][1] + .9, P[k][2]] }; }
     return null;

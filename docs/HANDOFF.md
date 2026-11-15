@@ -340,6 +340,66 @@ Bugs found on the way, worth remembering:
 smoke atlas, blade cut strips, `fogDensity`). Its edits were left uncommitted and untouched; this round's commit and
 the deployed page were built in a separate worktree from this round's changes only.
 
+## Round 21 (2026-11-15): the Codex session integrated; a sweep for blind spots
+
+While round 20 was being built, a Codex session worked in the same checkout. The owner prefers its fog and asked for
+its work to be integrated and swept. Its own notes are in [CODEX-SESSION-HANDOFF.md](CODEX-SESSION-HANDOFF.md)
+(Chinese): procedural smoke atlas (`--procedural-smoke`, `src/smoke-procedural.*`), denser foreground veils capped at
+88 % cover, blade seams and walking wakes that carry density (`transportCount` splats in `veil.wgsl`), a
+`subjectMask` MRT target that lets the hero and the opponent show through the foreground veils, a three-stroke combo
+(`SWORD_MOVES`, `swordTiming`, `comboBladeAt` in `player.js`), a point-by-point sword trail, reeds pressed by the
+hero's soles (`tread`), a clearing for the first duel (`DUEL_CLEARING`), hit feedback table and ground ink
+(`src/combat-fx.js`), a more detailed hero (`figure.js`, `{ detailed: true }`), and camera shake and punch-in done
+as a CSS transform on the canvas so fog and scene share one stable projection.
+
+Integration changes made on top of it:
+
+- **The 3D fog march was the hidden cost.** A level or upward view makes every ray run all its steps: the giant
+  fight cost 17.8 ms a frame at 1080p (13.4 ms of it render), where the tour demo, which looks down, cost 13.8 ms.
+  Hiding the giant, reeds, needles and wood together changed that by 1.3 ms; the step count changed it by 7.7 ms.
+  Default `STEPS` 56 -> 28 (`?steps=56` restores it). Against 56 the picture differs by 48-62 dB PSNR, i.e. not
+  visibly, because the 2D veils now carry the look.
+- **The giant was nearly invisible behind the denser veils.** It is now in the subject matte at its own value
+  (.25, `markSubject(giant, .25)` in `fog.js`); `main.js` drives `enemyClear` from its state (22 % asleep, 50 %
+  awake, 100 % while a leg or arm is raised or the hand lies on the ground). In the compositor the reveal grows with
+  height, so its legs stay sunk in the fog and it comes through from the chest up.
+- **A low camera looked out through a wall of yellow blades** (tiger form in the reed field). Tufts within 0.9-2.6 m
+  of the lens now shrink to nothing.
+- Smoke splats per layer 10 -> 14 (`MAXS`): blade strips, a wake, two bodies, the giant's six parts and two blasts
+  did not fit, and the blasts were the ones dropped.
+- Demos `journey` (the four shadows, then on to the giant) and `spin` (fast camera swings); `tools/check-spar.mjs`
+  takes a duration and reports the giant's state; both check tools take `PAGE=` to run against either build.
+- The page deployed from the repo root is now the **procedural** build (`cp dist/smoke-procedural.html index.html`):
+  it is what the Codex review videos were recorded from and it is a quarter smaller. `node build.mjs` still makes
+  the photographed-smoke build.
+
+Measured after integration (Apple M4, headless Chrome with the real GPU, nothing else on the GPU):
+
+| | photographed smoke `dist/index.html` | procedural smoke `dist/smoke-procedural.html` |
+|---|---|---|
+| size, raw / gzip | 1128.7 KB / 378.2 KB | 972.7 KB / 282.7 KB |
+| frame, tour demo, 720p / 1080p | 8.1 ms / 10.5 ms | 8.4 ms / 11.2 ms |
+| frame, giant fight, 720p / 1080p | not measured | 9.2 ms / 13.3 ms (was 10.9 / 18.0 with 56 steps) |
+
+Scripted checks, run on both builds with identical results and no console errors: `spar` (four shadows down in 25 s),
+`ward` (15 blows warded in 40 s, none taken), `journey` (shadows, then the giant wakes at 28 s and fights on to 90 s),
+`boss` (8 slams, 5 stamps in 60 s; planted hand at most 0.91 m from its aim at impact; soles within 1 cm of the
+ground), `stand` (a player who does not defend is hit 10 times in 50 s, falls and returns). The demos `combo`,
+`fogwalk`, `reeds`, `smokecut`, `slash`, `roar`, `flap`, `carp`, `tour` and `spin` each ran on the procedural build
+without errors and were looked at as contact sheets, not as video.
+
+Found and left for the owner to decide:
+- **A shadow now dies to one three-stroke combo** (1 + 1 + 2 damage against 3 health), so in the scripted runs the
+  four shadows never get to attack: guard, parry and dodge are no longer needed against them.
+- Camera shake and punch-in are a CSS transform of the canvas: screenshots and the page show it, but anything that
+  reads the canvas pixels directly (a recorder using `captureStream`) will not.
+- The first shadow stands at the clearing 9.7 m from the start, inside its 8.5 m wake distance after two steps.
+- Not exercised by any script: the ring or palm hitting a player in the air, guard against the giant, the three
+  beast forms against the giant, a window resize, and anything on a real phone.
+
+The plan for the next three pieces of work (player motion, beast transitions, the giant's staging and the climb to
+its head) is in [PLAN-NEXT.md](PLAN-NEXT.md) (Chinese).
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

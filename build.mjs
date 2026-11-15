@@ -4,8 +4,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
 
 const readable = process.argv.includes('--readable');
+const proceduralSmoke = process.argv.includes('--procedural-smoke');
 const entry = process.argv.find(a => a.startsWith('--entry='))?.slice(8) ?? 'src/main.js';
-const out = process.argv.find(a => a.startsWith('--out='))?.slice(6) ?? 'dist/index.html';
+const out = process.argv.find(a => a.startsWith('--out='))?.slice(6) ?? (proceduralSmoke ? 'dist/smoke-procedural.html' : 'dist/index.html');
 
 // .wgsl files become strings; comments and spare whitespace are stripped so shaders cost few bytes
 const wgsl = {
@@ -26,7 +27,7 @@ const wgsl = {
 const r = await build({
   entryPoints: [entry], bundle: true, format: 'iife', minify: !readable, target: 'es2022',
   write: false, metafile: true, plugins: [wgsl], legalComments: 'none', loader: { '.jpg': 'dataurl' },
-  define: { DEV: JSON.stringify(process.argv.includes('--dev')) },
+  define: { DEV: JSON.stringify(process.argv.includes('--dev')), PROCEDURAL_SMOKE: JSON.stringify(proceduralSmoke) },
 });
 const js = r.outputFiles[0].text;
 const html = readFileSync('src/template.html', 'utf8').replace('/*SCRIPT*/', () => js.replace(/<\/script/g, '<\\/script'));

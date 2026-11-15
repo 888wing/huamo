@@ -1,5 +1,5 @@
 // Scripted runs for repeatable captures: each sets the player's form and input over time and may pin the camera.
-import { height, START } from './world.js';
+import { DUEL_CLEARING, height, START } from './world.js';
 
 const place = (player, x, z, y) => { player.p[0] = x; player.p[2] = z; player.p[1] = y ?? height(x, z); player.v.fill(0); };
 const once = (player, key, fn) => { if (!player['_' + key]) { player['_' + key] = true; fn(); } };
@@ -10,6 +10,55 @@ export const DEMOS = {
     once(player, 's', () => { place(player, 0, 14); player.setForm(0); player.yaw = Math.PI; });
     cam.fixed = { pos: [3.4, 5.4, 20], look: [0, 1.2, 12.5] };
     inp.act = (t > .5 && t < .6) || (t > 1.6 && t < 1.7) || (t > 2.7 && t < 2.8);
+  },
+  // A side-on walk from the path through the reeds, with time for the first patch to rise again.
+  reeds(t, player, cam, inp) {
+    once(player, 's', () => {
+      place(player, 1.6, 19);
+      place(player.foe, -19, 4);
+      player.setForm(0);
+      player.yaw = -Math.PI / 2;
+    });
+    cam.yaw = -Math.PI / 2;
+    cam.fixed = { pos: [-1.7, 4.4, 24.1], look: [-1.6, .65, 19] };
+    inp.z = t > .45 && t < 2.55 ? .48 : 0;
+  },
+  // Face the camera across the low pond so the blade cuts a foreground layer in full view.
+  smokecut(t, player, cam, inp) {
+    const x = 4.3, z = -2.75;
+    once(player, 's', () => {
+      place(player, x, z);
+      player.setForm(0);
+      player.yaw = -.5;
+      place(player.foe, -20, 19);
+    });
+    const eye = t < 10 ? [2.6, 3.7, 2.8] : t < 20 ? [2.4, 6, -9.1] : [10.7, 2.8, -.35];
+    const angle = Math.atan2(eye[0] - x, eye[2] - z);
+    cam.fixed = { pos: eye, look: [x + Math.sin(angle) * .75, .95, z + Math.cos(angle) * .75] };
+    cam.yaw = angle;
+    const beat = t % 5;
+    const returnHome = beat >= 4.05 && beat < 4.8;
+    const dx = x - player.p[0], dz = z - player.p[2], s = Math.sin(angle), c = Math.cos(angle);
+    const move = v => returnHome ? Math.min(1, Math.max(-1, v)) : 0;
+    inp.act = beat >= 2.35 && beat < 2.57;
+    inp.x = move(dx * -c + dz * s);
+    inp.z = move(dx * s + dz * c);
+    if (beat < 2.32 && player.act <= 0 && Math.hypot(player.v[0], player.v[2]) < .3) {
+      const look = angle - player.yaw;
+      player.yaw += Math.atan2(Math.sin(look), Math.cos(look)) * .12;
+    }
+  },
+  // Cross the pond side-on, then hold the camera as the wake fills back in.
+  fogwalk(t, player, cam, inp) {
+    once(player, 's', () => {
+      place(player, 5.7, -3.9);
+      place(player.foe, -20, 19);
+      player.setForm(0);
+      player.yaw = -Math.PI / 2;
+    });
+    cam.yaw = -Math.PI / 2;
+    cam.fixed = { pos: [2.1, 3.55, 2.4], look: [3.25, .98, -3.9] };
+    inp.z = t > 2.1 && t < 4.2 ? .48 : 0;
   },
   roar(t, player, cam, inp) {
     once(player, 's', () => { place(player, 0, 14); player.setForm(1); player.yaw = Math.PI; });
@@ -52,6 +101,21 @@ export const DEMOS = {
     inp.guard = tell > .62 && turn === 0; inp.dodge = tell > .85 && turn === 1; if (inp.dodge) inp.x = 1;
     inp.act = d < 3.9 && player.foe.alive && !inp.guard && (t * 1.25) % 1 < .15;
   },
+  // Three separate presses against the first forest guard, then leave its defeat in view.
+  combo(t, player, cam, inp) {
+    const [x, z] = DUEL_CLEARING.center;
+    once(player, 's', () => {
+      place(player, ...DUEL_CLEARING.entry);
+      player.setForm(0);
+      player.yaw = Math.atan2(x - player.p[0], z - player.p[2]);
+      player.burst = 0;
+    });
+    cam.yaw = Math.atan2(x - player.p[0], z - player.p[2]);
+    const floor = height(x, z);
+    cam.fixed = { pos: [x + 5.2, floor + 4.7, z + 5.6], look: [x + .55, floor + 1.0, z + 1.1] };
+    const press = at => t >= at && t < at + .075;
+    inp.act = press(.96) || press(1.20) || press(1.47);
+  },
   // the giant, seen plainly: pass ?boss, and switch the fog off with --set='{"clear":true}'. The camera walks round it
   oni(t, player, cam, inp) {
     once(player, 's', () => { place(player, .3, -14.5); player.setForm(0); player.burst = 0; player.yaw = Math.PI; });
@@ -80,6 +144,17 @@ export const DEMOS = {
     once(player, 's', () => { place(player, .2, -15); player.setForm(0); player.burst = 0; player.yaw = Math.PI; });
     const g = player.boss; cam.yaw = Math.atan2(g.p[0] - player.p[0], g.p[2] - player.p[2]); cam.pitch = -.3;
     inp.x = inp.up = 0; inp.z = Math.hypot(g.p[0] - player.p[0], g.p[2] - player.p[2]) > 5.5 ? 1 : 0; inp.act = inp.dodge = inp.guard = false;
+  },
+  // the whole slice in one run: the four shadows along the path, then on to the giant. For checking the full flow
+  journey(t, player, cam, inp) {
+    if (player.foe.mode !== 'done') return DEMOS.spar(t, player, cam, inp);
+    inp.guard = false; DEMOS.boss(t, player, cam, inp);
+  },
+  // stand in the reeds and swing the camera round fast, both ways: for checking that the smoke layers keep their place
+  spin(t, player, cam, inp) {
+    once(player, 's', () => { place(player, .8, 8); player.setForm(0); player.burst = 0; cam.yaw = Math.PI; player.foe.n = player.foe.total; player.foe.spawn(); });
+    inp.x = inp.z = inp.up = 0; inp.act = inp.dodge = inp.guard = false;
+    cam.yaw = Math.PI + 1.6 * Math.sin(t * 2.4) * Math.min(1, t / 1.5); cam.pitch = -.3 + .25 * Math.sin(t * 1.7);
   },
   // defence only: stand and answer each raised sword, guarding early, guarding late (a parry), or dodging aside
   ward(t, player, cam, inp) {

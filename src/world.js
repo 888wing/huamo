@@ -73,6 +73,13 @@ export function pathPoint(f) {
   let d = f * total;
   for (let i = 0; i < seg.length; i++) { if (d <= seg[i] || i === seg.length - 1) { const t = Math.min(1, d / seg[i]); return [PATH[i][0] + (PATH[i + 1][0] - PATH[i][0]) * t, PATH[i][1] + (PATH[i + 1][1] - PATH[i][1]) * t]; } d -= seg[i]; }
 }
+export const FIGHT_STATIONS = [.22, .38, .54, .7].map(pathPoint);
+// The forest path widens into a clearing for the first encounter.
+export const DUEL_CLEARING = { center: FIGHT_STATIONS[0], entry: pathPoint(.15), radius: 4.6 };
+export function duelDist(x, z) {
+  const [cx, cz] = DUEL_CLEARING.center;
+  return Math.hypot(x - cx, z - cz);
+}
 // The clearing at the path's end where the giant waits: it squats at `home` and never goes far from it.
 export const ARENA = { home: [.6, -20.5], gate: [-.6, -13] };
 export function arenaDist(x, z) {

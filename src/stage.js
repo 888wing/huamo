@@ -1,7 +1,7 @@
 // The three.js side of the world, all drawn as ink on paper: terrain, far mountains, pines, reeds and the sword stroke.
 import * as THREE from 'three/webgpu';
-import { Fn, vec2, vec3, float, mix, min, max, length, smoothstep, normalWorld, positionWorld, positionLocal, positionView, texture3D, dot, uniform, attribute, clamp, sin, cos, atan, step, floor, fract, exp } from 'three/tsl';
-import { SIZE, height, PILLARS, PATH, pathDist, arenaDist, OBSTACLES } from './world.js';
+import { Fn, vec2, vec3, float, mix, min, max, length, smoothstep, normalWorld, positionWorld, positionLocal, positionView, cameraPosition, texture3D, dot, uniform, attribute, clamp, sin, cos, atan, step, floor, fract, exp } from 'three/tsl';
+import { SIZE, height, PILLARS, PATH, pathDist, arenaDist, DUEL_CLEARING, duelDist, OBSTACLES } from './world.js';
 import noiseSrc from './noise.wgsl';
 
 export const INK = new THREE.Color(0x121419), PAPER = new THREE.Color(0xece6d8), SEAL = new THREE.Color(0xb3301f);
@@ -47,8 +47,12 @@ function terrainMaterial(noise) {
       d = min(d, length(pa.sub(ba.mul(clamp(dot(pa, ba).div(dot(ba, ba)), 0, 1)))));
     }
     const dw = d.add(streak.sub(.5).mul(.9)), onPath = smoothstep(1.9, 1.3, dw);
-    const edge = smoothstep(.35, 0, dw.sub(1.75).abs()).mul(smoothstep(.35, .6, fine)).mul(.3);
-    return wash(mix(mix(ground, float(.8).add(blotch.sub(.5).mul(.12)), onPath).sub(edge), face, rock));
+    const duel = length(p.xz.sub(vec2(...DUEL_CLEARING.center))).add(streak.sub(.5).mul(1.05));
+    const clearing = smoothstep(DUEL_CLEARING.radius + .55, DUEL_CLEARING.radius - .6, duel);
+    const pathEdge = smoothstep(.35, 0, dw.sub(1.75).abs()).mul(clearing.oneMinus());
+    const clearingEdge = smoothstep(.64, 0, duel.sub(DUEL_CLEARING.radius).abs()).mul(onPath.oneMinus());
+    const edge = max(pathEdge, clearingEdge.mul(.62)).mul(smoothstep(.35, .6, fine)).mul(.3);
+    return wash(mix(mix(ground, float(.8).add(blotch.sub(.5).mul(.12)), max(onPath, clearing)).sub(edge), face, rock));
   })());
 }
 // a far mountain: ink at the ridge, dissolving into nothing at its foot
@@ -183,11 +187,11 @@ export function buildStage(scene, noise) {
   for (const i of [0, 2, 5]) { const [px, pz, , ph] = PILLARS[i]; pine(px + .3, pz - .2, .55, ph - .1); }
   // the forest: pines all through the basin, standing back from the path, the pillars and the clearing at the path's end
   const clear = (x, z, gap) => pathDist(x, z) > gap && PILLARS.every(([px, pz, pr]) => Math.hypot(x - px, z - pz) > pr + 1.2) && Math.hypot(x, z) < 21;
-  for (let i = 0, n = 0; i < 400 && n < 46; i++) { const x = (rnd() - .5) * 42, z = (rnd() - .5) * 46; if (clear(x, z, 3.4) && arenaDist(x, z) > 9) { pine(x, z, .7 + rnd() * .55); n++; } }
+  for (let i = 0, n = 0; i < 400 && n < 46; i++) { const x = (rnd() - .5) * 42, z = (rnd() - .5) * 46; if (clear(x, z, 3.4) && arenaDist(x, z) > 9 && duelDist(x, z) > DUEL_CLEARING.radius + 1) { pine(x, z, .7 + rnd() * .55); n++; } }
   // bushes: the same needle fans, bunched low on the ground, thicker along the path's edges
   for (let i = 0, n = 0; i < 9000 && n < 230; i++) {
     const x = (rnd() - .5) * 44, z = (rnd() - .5) * 50, d = pathDist(x, z);
-    if (!clear(x, z, 2.2) || arenaDist(x, z) < 6.5 || rnd() > 1.2 / (1 + d * .28)) continue;
+    if (!clear(x, z, 2.2) || arenaDist(x, z) < 6.5 || duelDist(x, z) < DUEL_CLEARING.radius + .6 || rnd() > 1.2 / (1 + d * .28)) continue;
     const k = .55 + rnd() * .75, y = height(x, z);
     for (let j = 0, m = 4 + (rnd() * 4 | 0); j < m; j++) { const a = rnd() * 6.283, r = rnd() * .7 * k; tuft(x + Math.cos(a) * r, y - .08, z + Math.sin(a) * r, (.5 + rnd() * .45) * k, 1); }
     n++;
@@ -206,11 +210,59 @@ export function buildStage(scene, noise) {
   }
   const reed = new THREE.InstancedBufferGeometry(); reed.setAttribute('position', new THREE.Float32BufferAttribute(rp, 3)); reed.setIndex(ri);
   const RN = 11000, ip = new Float32Array(RN * 4); let rn = 0;
-  for (let i = 0; i < RN * 30 && rn < RN; i++) { const x = (rnd() - .5) * 44, z = (rnd() - .5) * 52, d = pathDist(x, z); if (!clear(x, z, 1.25) || rnd() > 1.6 / (1 + d * .14)) continue; ip.set([x, height(x, z) - .04, z, .8 + rnd() * .6], rn++ * 4); }
+  for (let i = 0; i < RN * 30 && rn < RN; i++) {
+    const x = (rnd() - .5) * 44, z = (rnd() - .5) * 52, d = pathDist(x, z);
+    if (!clear(x, z, 1.25) || duelDist(x, z) < DUEL_CLEARING.radius || rnd() > 1.6 / (1 + d * .14)) continue;
+    ip.set([x, height(x, z) - .04, z, .8 + rnd() * .6], rn++ * 4);
+  }
   reed.setAttribute('ipos', new THREE.InstancedBufferAttribute(ip.subarray(0, rn * 4), 4)); reed.instanceCount = rn;
+  // A planted foot only touches nearby tufts. Store direction, pressure and contact time;
+  // the shader releases the pressure after the foot moves on.
+  const footmarks = new Float32Array(rn * 4);
+  const footmarkAttribute = new THREE.InstancedBufferAttribute(footmarks, 4).setUsage(THREE.DynamicDrawUsage);
+  reed.setAttribute('footmark', footmarkAttribute);
+  const reedBins = new Map(), binKey = (x, z) => (x + 32) * 64 + z + 32;
+  for (let i = 0; i < rn * 4; i += 4) {
+    const key = binKey(Math.floor(ip[i]), Math.floor(ip[i + 2]));
+    if (!reedBins.has(key)) reedBins.set(key, []);
+    reedBins.get(key).push(i);
+  }
+  const radius = .66, footprintDecay = 3.2;
+  const tread = (clock, feet, vx, vz) => {
+    let first = footmarks.length, last = -1;
+    const speed = Math.hypot(vx, vz);
+    const forwardX = vx / Math.max(speed, 1), forwardZ = vz / Math.max(speed, 1);
+    for (const foot of feet) {
+      const lift = foot.y - height(foot.x, foot.z);
+      if (lift > .24) continue;
+      const load = 1 - Math.max(lift, 0) / .27;
+      for (let x = Math.floor(foot.x - radius); x <= Math.floor(foot.x + radius); x++) {
+        for (let z = Math.floor(foot.z - radius); z <= Math.floor(foot.z + radius); z++) {
+          const tufts = reedBins.get(binKey(x, z));
+          if (!tufts) continue;
+          for (const i of tufts) {
+            const dx = ip[i] - foot.x, dz = ip[i + 2] - foot.z, distanceSquared = dx * dx + dz * dz;
+            const pressure = Math.max(0, 1 - distanceSquared / (radius * radius)) ** 2 * load;
+            const held = footmarks[i + 2] * Math.exp(-(clock - footmarks[i + 3]) * footprintDecay);
+            if (pressure < held + .045) continue;
+            const distance = Math.max(Math.sqrt(distanceSquared), .10);
+            footmarks[i] = dx / distance * .8 + forwardX * .4;
+            footmarks[i + 1] = dz / distance * .8 + forwardZ * .4;
+            footmarks[i + 2] = pressure;
+            footmarks[i + 3] = clock;
+            first = Math.min(first, i); last = Math.max(last, i);
+          }
+        }
+      }
+    }
+    if (last >= first) {
+      footmarkAttribute.addUpdateRange(first, last - first + 4);
+      footmarkAttribute.needsUpdate = true;
+    }
+  };
   // a, b: two walkers (position). press: three heavy things (position, radius). ring: a shock running outwards (x, z, radius, strength)
   const P4 = () => uniform(new THREE.Vector4(0, -99, 0, 1));
-  const ru = { time, a: uniform(new THREE.Vector3()), b: uniform(new THREE.Vector3(0, -99, 0)), press: [P4(), P4(), P4()], ring: uniform(new THREE.Vector4(0, 0, 0, 0)) };
+  const ru = { time, tread, a: uniform(new THREE.Vector3()), b: uniform(new THREE.Vector3(0, -99, 0)), press: [P4(), P4(), P4()], ring: uniform(new THREE.Vector4(0, 0, 0, 0)) };
   const rm = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
   const I = attribute('ipos', 'vec4'), up = positionLocal.y, root = I.xyz;
   const lean = (c, r) => { const o = root.xz.sub(c.xz), d = length(o); return o.div(d.add(.01)).mul(smoothstep(r, r.mul(.11), d)).mul(smoothstep(2.2, 0, root.y.sub(c.y).abs())); };
@@ -218,8 +270,12 @@ export function buildStage(scene, noise) {
   const ro = root.xz.sub(ru.ring.xy), rd = length(ro), shock = ro.div(rd.add(.01)).mul(ru.ring.w).mul(exp(rd.sub(ru.ring.z).div(1.3).pow2().negate()));
   let push = lean(ru.a, float(1.8)).add(lean(ru.b, float(1.8))).mul(.8).add(shock);
   for (const c of ru.press) push = push.add(lean(c, c.w).mul(1.15));
-  const bend = wind.add(push).mul(up.mul(up));
-  rm.positionNode = vec3(positionLocal.x.add(bend.x), up.sub(length(bend).mul(.35)), positionLocal.z.add(bend.y)).mul(I.w).add(root);
+  const mark = attribute('footmark', 'vec4'), pressure = mark.z.mul(exp(ru.time.sub(mark.w).mul(-footprintDecay)));
+  const bend = wind.add(push).add(mark.xy.mul(pressure.mul(.68))).mul(up.mul(up));
+  const lifted = max(up.mul(.08), up.sub(length(bend).mul(.35)).sub(up.mul(pressure.mul(.57))));
+  // tufts right at the lens shrink away to nothing, so a low camera (the tiger's) never looks out through a wall of blades
+  const nearLens = smoothstep(.9, 2.6, length(root.sub(cameraPosition)));
+  rm.positionNode = vec3(positionLocal.x.add(bend.x), lifted, positionLocal.z.add(bend.y)).mul(I.w.mul(nearLens)).add(root);
   // dry grass: ochre at the root, straw gold at the tip, each tuft a little different
   const var_ = texture3D(noise, root.mul(.3)).b, patch = texture3D(noise, root.mul(.045)).r, t = up.div(1.1);
   rm.colorNode = mix(vec3(.3, .17, .03), mix(vec3(.78, .46, .05), vec3(.95, .68, .13), patch), smoothstep(0, .8, t)).mul(var_.sub(.5).mul(.5).add(1));
@@ -227,62 +283,141 @@ export function buildStage(scene, noise) {
   return { reeds: ru, parts: { needles: needleMesh, wood: woodMesh, reeds } };
 }
 
-// The sword stroke: a band along the path of the sword's tip, pressed down in the middle and lifted at both ends like a
-// brush stroke. It lives in its own scene and is laid over the finished picture, so the fog never hides it.
-// The material writes coverage into the red channel over a black clear.
-export function buildTrail(noise, into, N = 22) {
+// Draw only the path the blade has travelled. The green edge flashes first, then the ink dries and narrows behind it.
+export function buildTrail(noise, into) {
+  const N = 72, lifetime = .29;
   const scene = into ?? new THREE.Scene(); if (!into) scene.background = new THREE.Color(0);
-  const pos = new Float32Array(N * 2 * 3), age = new Float32Array(N * 2).fill(1), idx = [];
+  const pos = new Float32Array(N * 2 * 3), age = new Float32Array(N * 2), weight = new Float32Array(N * 2), idx = [];
   for (let i = 0; i < N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('age', new THREE.BufferAttribute(age, 1)); g.setIndex(idx);
-  g.setAttribute('side', new THREE.BufferAttribute(Float32Array.from({ length: N * 2 }, (_, i) => i % 2 ? -1 : 1), 1));
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('age', new THREE.BufferAttribute(age, 1).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('weight', new THREE.BufferAttribute(weight, 1).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('edge', new THREE.BufferAttribute(Float32Array.from({ length: N * 2 }, (_, i) => i % 2 ? 0 : 1), 1));
+  g.setIndex(idx);
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false, depthTest: false });
-  const a = attribute('age', 'float'), n = texture3D(noise, positionWorld.mul(vec3(.35, 3.2, .35))).b;
-  // soft at both edges, streaked along its length like bristles, and running dry as it ages
-  const sd = attribute('side', 'float'), bristle = texture3D(noise, vec3(sd.mul(2.2), positionWorld.x.mul(.07), positionWorld.z.mul(.07))).g;
-  m.opacityNode = smoothstep(1, .2, a).mul(smoothstep(-1, -.2, sd).mul(smoothstep(1, .9, sd))).mul(smoothstep(a.mul(.8).add(.12), a.mul(.8).add(.4), n.mul(.5).add(bristle.mul(.7))));
-  // red = ink coverage; green = the white light along the leading outer edge, gone almost at once
-  m.colorNode = vec3(1, smoothstep(.45, .9, sd).mul(a.oneMinus().pow(3)), 0);
+  m.forceSinglePass = true;
+  const a = attribute('age', 'float'), edge = attribute('edge', 'float'), w = attribute('weight', 'float');
+  const body = smoothstep(.02, .46, edge).mul(smoothstep(.94, 1, edge).oneMinus());
+  const edgeLight = smoothstep(.77, .91, edge).mul(smoothstep(.96, 1, edge).oneMinus());
+  const bristle = texture3D(noise, vec3(edge.mul(3.4), positionWorld.x.mul(.12), positionWorld.z.mul(.12))).g;
+  const dry = mix(1, smoothstep(a.mul(.71).add(.02), a.mul(.71).add(.28), bristle), smoothstep(.12, .7, a));
+  m.opacityNode = body.mul(dry).mul(smoothstep(.06, 1, a).oneMinus()).mul(w);
+  // Red is composited as ink and green as light. The fine edge outlasts the dark core only near the moving tip.
+  m.colorNode = vec3(mix(.42, .86, w), edgeLight.mul(a.oneMinus().pow(6)).mul(mix(.68, 1.2, w)), 0);
   const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.visible = false; scene.add(mesh);
-  let live = 0;
+  const points = [], smooth = THREE.MathUtils.smoothstep, lerp = THREE.MathUtils.lerp;
+  let time = 0, previousPhase = -1;
+  const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const cubic = (a, b, c, d, x) => b + .5 * x * (c - a + x * (2 * a - 5 * b + 4 * c - d + x * (3 * b - a - 3 * c + d)));
   return {
     scene,
-    // tip: where the sword's tip is now, w: half-width of the stroke there (or null when not striking)
-    update(dt, tip, w) {
-      pos.copyWithin(6, 0, (N - 1) * 6); age.copyWithin(2, 0, (N - 1) * 2);
-      for (let i = 2; i < N * 2; i++) age[i] = Math.min(1, age[i] + dt / .5);
-      if (tip) { pos.set(tip, 0); pos.set(w, 3); age[0] = age[1] = 0; live = N; } // tip = outer edge, w = inner edge of the crescent
-      else { pos.copyWithin(0, 6, 12); age[0] = age[1] = 1; live--; }
-      mesh.visible = live > 0;
-      g.attributes.position.needsUpdate = true; g.attributes.age.needsUpdate = true;
+    update(dt, blade, phase, drawnTip) {
+      time += dt;
+      if (blade && (previousPhase < 0 || phase < previousPhase)) points.length = 0;
+      previousPhase = blade ? phase : -1;
+      if (blade && phase > .13 && phase < .99) {
+        const pressure = smooth(phase, .24, .52) * (1 - smooth(phase, .57, .99));
+        const reach = smooth(phase, .16, .37);
+        const tip = blade.b.map((value, i) => lerp(drawnTip.getComponent(i), value, reach));
+        tip[1] += .09 * pressure;
+        const sweepWeight = blade.combo === 2 ? 1.23 : blade.combo === 1 ? .84 : 1;
+        const width = .045 + .51 * pressure ** 1.3 * sweepWeight;
+        const inner = tip.map((value, i) => lerp(value, blade.a[i], width));
+        inner[1] -= .12 * pressure;
+        const strength = smooth(phase, .13, .34) * (.26 + .74 * pressure) * (1 - smooth(phase, .71, 1));
+        const last = points.at(-1);
+        if (!last || time - last.time >= 1 / 120 || distance(tip, last.tip) > .04) {
+          points.push({ time, tip, inner, strength });
+        }
+      }
+      while (points.length && time - points[0].time >= lifetime) points.shift();
+      let count = 0;
+      const row = (p0, p1, p2, p3, u) => {
+        const t = Math.min(1, (time - lerp(p1.time, p2.time, u)) / lifetime);
+        const shrink = 1 - .65 * t * t;
+        for (let j = 0; j < 3; j++) {
+          const outer = cubic(p0.tip[j], p1.tip[j], p2.tip[j], p3.tip[j], u);
+          const inner = cubic(p0.inner[j], p1.inner[j], p2.inner[j], p3.inner[j], u);
+          pos[count * 6 + j] = outer;
+          pos[count * 6 + 3 + j] = lerp(outer, inner, shrink);
+        }
+        age[count * 2] = age[count * 2 + 1] = t;
+        weight[count * 2] = weight[count * 2 + 1] = lerp(p1.strength, p2.strength, u);
+        count++;
+      };
+      // Interpolate the measured tip path between simulation ticks, including the faster release.
+      for (let i = points.length - 1; i > 0 && count < N; i--) {
+        const b = points[i], c = points[i - 1], a = points[i + 1] ?? b, d = points[i - 2] ?? c;
+        const steps = Math.max(1, Math.ceil(distance(b.tip, c.tip) / .17));
+        for (let j = 0; j < steps && count < N; j++) row(a, b, c, d, j / steps);
+        if (i === 1 && count < N) row(a, b, c, d, 1);
+      }
+      mesh.visible = count > 1;
+      g.setDrawRange(0, Math.max(0, count - 1) * 6);
+      if (mesh.visible) for (const attribute of Object.values(g.attributes)) if (attribute !== g.attributes.edge) attribute.needsUpdate = true;
     },
   };
 }
 
 // Ink thrown off by a blow: droplets that fly, fall and shrink. They sit in the stroke scene, so they land on top of the fog.
 export function buildSplash(scene, N = 260) {
-  const m = new THREE.MeshBasicNodeMaterial({ depthTest: false, depthWrite: false }); m.colorNode = vec3(1, 0, 0); // red channel only: ink, not light
-  const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 6, 4), m, N); mesh.frustumCulled = false; scene.add(mesh);
-  const p = new Float32Array(N * 3), v = new Float32Array(N * 3), life = new Float32Array(N), size = new Float32Array(N), M = new THREE.Matrix4();
+  const geometry = new THREE.SphereGeometry(1, 7, 5);
+  const light = new Float32Array(N);
+  const lightAttribute = new THREE.InstancedBufferAttribute(light, 1).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('impactLight', lightAttribute);
+  const m = new THREE.MeshBasicNodeMaterial({ depthTest: false, depthWrite: false });
+  const gleam = attribute('impactLight', 'float');
+  m.colorNode = vec3(gleam.oneMinus(), gleam, 0); // red inks the scene; green catches the blade's light
+  const mesh = new THREE.InstancedMesh(geometry, m, N);
+  mesh.frustumCulled = mesh.visible = false;
+  scene.add(mesh);
+  const p = new Float32Array(N * 3), v = new Float32Array(N * 3), life = new Float32Array(N), size = new Float32Array(N);
+  const M = new THREE.Matrix4(), direction = new THREE.Vector3(), scale = new THREE.Vector3(), point = new THREE.Vector3();
+  const orientation = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   let next = 0;
   return {
     // at: where the blow landed, dir: which way it was travelling (x, z), n: how many droplets
     // big: larger, faster, longer-lived droplets, for the giant's blows
-    burst(at, dir, n, big = 1) {
-      for (let i = 0; i < n; i++) {
-        const k = next++ % N, a = Math.random() * 6.283, s = (2 + Math.random() * 9) * Math.sqrt(big), up = Math.random();
-        p.set(at, k * 3); v[k * 3] = Math.cos(a) * s * .6 + dir[0] * s; v[k * 3 + 1] = (1 + up * 7) * Math.sqrt(big); v[k * 3 + 2] = Math.sin(a) * s * .6 + dir[1] * s;
-        life[k] = (.35 + Math.random() * .5) * Math.sqrt(big); size[k] = (.03 + Math.random() ** 3 * .16) * big;
+    burst(at, dir, n, big = 1, glints = 0) {
+      const strength = Math.sqrt(big);
+      for (let i = 0; i < n + glints; i++) {
+        const k = next++ % N, j = k * 3, a = Math.random() * 2 * Math.PI;
+        const spark = i >= n, speed = (2.5 + Math.random() * (spark ? 13 : 9)) * strength;
+        p.set(at, j);
+        v[j] = (Math.cos(a) * (spark ? 1 : .48) + dir[0] * .78) * speed;
+        v[j + 1] = (spark ? (Math.random() - .25) * 5 : 1.5 + Math.random() * 6.2) * strength;
+        v[j + 2] = (Math.sin(a) * (spark ? 1 : .48) + dir[1] * .78) * speed;
+        life[k] = (spark ? .075 + Math.random() * .13 : .26 + Math.random() * .47) * strength;
+        size[k] = (spark ? .012 + Math.random() * .018 : .018 + Math.random() ** 3 * .11) * big;
+        light[k] = spark ? 1 : 0;
       }
+      lightAttribute.needsUpdate = true;
     },
     update(dt) {
+      let visible = false;
       for (let k = 0; k < N; k++) {
-        if (life[k] > 0) { life[k] -= dt; v[k * 3 + 1] -= 20 * dt; for (let a = 0; a < 3; a++) { v[k * 3 + a] *= 1 - 2.5 * dt; p[k * 3 + a] += v[k * 3 + a] * dt; } }
-        const s = life[k] > 0 ? size[k] * Math.min(1, life[k] * 4) : 0, sp = Math.hypot(v[k * 3], v[k * 3 + 1], v[k * 3 + 2]) * .012;
-        M.makeScale(s, s * (1 + sp * 8), s).setPosition(p[k * 3], p[k * 3 + 1], p[k * 3 + 2]); mesh.setMatrixAt(k, M); // stretched along its fall
+        const j = k * 3;
+        if (life[k] > 0) {
+          life[k] -= dt;
+          v[j + 1] -= (light[k] ? 4 : 22) * dt;
+          for (let a = 0; a < 3; a++) { v[j + a] *= 1 - 2.5 * dt; p[j + a] += v[j + a] * dt; }
+          if (v[j + 1] < 0 && p[j + 1] <= height(p[j], p[j + 2])) life[k] = 0;
+        }
+        if (life[k] > 0) {
+          const s = size[k] * Math.min(1, life[k] * (light[k] ? 15 : 5));
+          const speed = direction.set(v[j], v[j + 1], v[j + 2]).length();
+          orientation.setFromUnitVectors(up, direction.divideScalar(Math.max(speed, .001)));
+          scale.set(s, s * (1 + speed * (light[k] ? .46 : .14)), s);
+          M.compose(point.set(p[j], p[j + 1], p[j + 2]), orientation, scale);
+          visible = true;
+        } else {
+          M.makeScale(0, 0, 0);
+        }
+        mesh.setMatrixAt(k, M);
       }
-      mesh.instanceMatrix.needsUpdate = true;
+      mesh.visible = visible;
+      if (visible) mesh.instanceMatrix.needsUpdate = true;
     },
   };
 }
