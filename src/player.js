@@ -1,6 +1,6 @@
 // The fighters. The player is one body with four forms; each form moves differently and pushes on the fog differently.
 // The enemy is an ink shadow of the swordsman that closes in, shows its strike before it comes, and can be cut down.
-import { height, SIZE, FOG_TOP } from './world.js';
+import { height, SIZE, FOG_TOP, pathPoint, pushOut } from './world.js';
 
 export const FORMS = ['人 斬', '虎 吼', '鶴 翼', '鯉 游'];
 const SPEED = [5.5, 12, 11, 7.5], ACT = [0.36, 0.35, 0.7, 0.5], COOL = [0.62, 1.4, 0.9, 1.2];
@@ -26,11 +26,12 @@ function walk(p, v, dt, step) {
     const q = [p[0], p[1], p[2]]; q[a] += v[a] * dt;
     if (Math.abs(q[a]) < SIZE / 2 - 2.5 && height(q[0], q[2]) - p[1] < step) p[a] = q[a]; else v[a] = 0;
   }
+  pushOut(p, .32);
 }
 
 export class Player {
   constructor() {
-    this.p = [0, 0, 13]; this.p[1] = height(0, 13);
+    this.p = [1.5, 0, 19]; this.p[1] = height(1.5, 19);
     this.v = [0, 0, 0]; this.yaw = Math.PI; this.form = 0;
     this.act = 0; this.cool = 0; this.side = 1; this.ground = true; this.phase = 0; this.burst = 0; this.shake = 0; this.t = 0; this.stagger = 0; this.hit = false;
     this.hp = HP; this.dodge = 0; this.dodgeCool = 0; this.guard = false; this.guardT = 0; this.fallen = 0; this.dv = [0, 0];
@@ -44,7 +45,7 @@ export class Player {
     const { p, v } = this, f = this.form;
     if (this.fallen > 0) { // cut down: scattered as ink, then back at the start
       this.fallen -= dt; v[0] = v[2] = 0;
-      if (this.fallen <= 0) { p[0] = 0; p[2] = 13; p[1] = height(0, 13); this.hp = HP; this.burst = BURST; this.stagger = 0; }
+      if (this.fallen <= 0) { p[0] = 1.5; p[2] = 19; p[1] = height(1.5, 19); this.hp = HP; this.burst = BURST; this.stagger = 0; }
       return;
     }
     const F = [Math.sin(cam.yaw), 0, Math.cos(cam.yaw)], R = [-F[2], 0, F[0]];
@@ -126,16 +127,19 @@ export class Player {
   }
 }
 
-const SPOTS = [[7, 15], [-5, 16], [4, 3], [-7, 8], [11, 8]];
+const STATIONS = [.2, .4, .6, .8].map(pathPoint); // one enemy at a time, each waiting further along the path
 const WIND = 0.55, STRIKE = 0.34;
 
 export class Enemy {
   constructor() { this.n = 0; this.spawn(); }
   spawn() {
-    const [x, z] = SPOTS[this.n++ % SPOTS.length];
-    this.p = [x, height(x, z), z]; this.v = [0, 0, 0]; this.yaw = 0; this.hp = 3; this.mode = 'rise'; this.clock = 0; this.side = 1; this.stagger = 0; this.phase = 0; this.t = 0; this.hit = false; this.orbit = 1;
+    this.total = STATIONS.length;
+    if (this.n >= STATIONS.length) { this.mode = 'done'; this.p = [0, -99, 0]; this.v = [0, 0, 0]; return; }
+    const [x, z] = STATIONS[this.n];
+    this.p = [x, height(x, z), z]; this.v = [0, 0, 0]; this.yaw = 0; this.hp = 3; this.mode = 'wait'; this.clock = 0; this.side = 1; this.stagger = 0; this.phase = 0; this.t = 0; this.hit = false; this.orbit = 1;
   }
-  get alive() { return this.mode !== 'fall' && this.mode !== 'gone' && this.mode !== 'rise'; }
+  get alive() { return !['fall', 'gone', 'rise', 'wait', 'done'].includes(this.mode); }
+  get present() { return this.mode !== 'gone' && this.mode !== 'done'; }
   get windup() { return this.mode === 'wind' ? this.clock / WIND : 0; }
   get actT() { return this.mode === 'strike' ? Math.min(1, this.clock / STRIKE) : -1; }
   get fallT() { return this.mode === 'fall' ? Math.min(1, this.clock / .45) : 0; }                                  // toppling backwards
@@ -152,7 +156,9 @@ export class Enemy {
     const { p, v } = this; this.clock += dt; this.t += dt; this.stagger = Math.max(0, this.stagger - dt);
     const dx = pl[0] - p[0], dz = pl[2] - p[2], dist = Math.hypot(dx, dz) || 1, to = Math.atan2(dx, dz);
     let want = [0, 0];
-    if (this.mode === 'gone') { if (this.clock > 2.2) { this.spawn(); } return; }
+    if (this.mode === 'done') return;
+    if (this.mode === 'gone') { if (this.clock > 1.5) { this.n++; this.spawn(); } return; }
+    if (this.mode === 'wait') { this.yaw += wrap(to - this.yaw) * Math.min(1, 3 * dt); if (dist < 8.5) this.go('stalk'); return; } // standing in the fog until the player comes near
     if (this.mode === 'rise') { if (this.clock > .8) this.go('stalk'); }
     else if (this.mode === 'fall') { if (this.clock > 1.75) this.go('gone'); }
     else if (this.mode === 'reel') { if (this.clock > .5) this.go('stalk'); }
@@ -171,7 +177,7 @@ export class Enemy {
   }
   blade() { const t = this.actT; return t >= 0 ? bladeAt(this.p, this.v, this.yaw, this.side, t, STRIKE) : null; }
   emitters() {
-    if (this.mode === 'gone') return [];
+    if (!this.present) return [];
     const U = [0, 1, 0], sp = Math.hypot(this.v[0], this.v[2]);
     if (this.mode === 'fall') { // the body on the ground bleeds ink along its length
       const back = [-Math.sin(this.yaw), 0, -Math.cos(this.yaw)], k = Math.sin(Math.PI * this.meltT);

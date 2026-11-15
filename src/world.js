@@ -65,3 +65,15 @@ export function pathDist(x, z) {
   }
   return best;
 }
+
+// a point on the path at a share f (0..1) of its length
+export function pathPoint(f) {
+  const seg = PATH.slice(1).map((b, i) => Math.hypot(b[0] - PATH[i][0], b[1] - PATH[i][1])), total = seg.reduce((a, b) => a + b, 0);
+  let d = f * total;
+  for (let i = 0; i < seg.length; i++) { if (d <= seg[i] || i === seg.length - 1) { const t = Math.min(1, d / seg[i]); return [PATH[i][0] + (PATH[i + 1][0] - PATH[i][0]) * t, PATH[i][1] + (PATH[i + 1][1] - PATH[i][1]) * t]; } d -= seg[i]; }
+}
+// tree trunks: [x, z, radius], filled in by the stage. pushOut keeps a body (or the camera) outside them.
+export const OBSTACLES = [];
+export function pushOut(p, pad) {
+  for (const [x, z, r] of OBSTACLES) { const dx = p[0] - x, dz = p[2] - z, d = Math.hypot(dx, dz), m = r + pad; if (d < m && d > 1e-4) { p[0] = x + dx / d * m; p[2] = z + dz / d * m; } }
+}

@@ -43,7 +43,7 @@ export const DEMOS = {
   },
   // sparring: walk up to the ink shadow and trade strokes with it
   spar(t, player, cam, inp) {
-    once(player, 's', () => { place(player, 2, 12); player.setForm(0); player.burst = 0; });
+    once(player, 's', () => { place(player, 1.5, 19); player.setForm(0); player.burst = 0; });
     const e = player.foe.p, dx = e[0] - player.p[0], dz = e[2] - player.p[2], d = Math.hypot(dx, dz);
     let a = Math.atan2(dx, dz) + .5 - cam.yaw; a = Math.atan2(Math.sin(a), Math.cos(a));
     cam.yaw += a * Math.min(1, 2.5 / 60); cam.pitch = -.2;

@@ -2,7 +2,7 @@
 import * as THREE from 'three/webgpu';
 import { createDevice, Gpu } from './gpu.js';
 import { Sim3D } from './sim3d.js';
-import { FOG_TOP, height, terrainTexture } from './world.js';
+import { FOG_TOP, height, terrainTexture, pushOut } from './world.js';
 import { buildStage, buildTrail, buildSplash, noiseTexture, external, PAPER } from './stage.js';
 import { buildBeasts } from './beasts.js';
 import { createFog } from './fog.js';
@@ -33,7 +33,7 @@ async function boot() {
   scene.background = new THREE.Color(PAPER);
   const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.2, 600);
   const noise = await noiseTexture(gpu);
-  buildStage(scene, noise);
+  const stage = buildStage(scene, noise);
   const beasts = buildBeasts(scene, noise), trail = buildTrail(noise), trail2 = buildTrail(noise, trail.scene);
   const hero = new Figure(scene, noise, { robe: .76, cloak: .1, legs: .22, hat: .46, skin: .8, wraps: .74 });
   const shade = new Figure(scene, noise, { robe: .2, cloak: .02, legs: .06, hat: .1, skin: .3, wraps: .16 });
@@ -130,7 +130,7 @@ async function boot() {
     // ---- bodies: skeletons posed in code on top of the simulation-driven position
     const f = player.form, sp = Math.hypot(player.v[0], player.v[2]), run = Math.min(1, sp / [5.5, 12, 11, 7.5][f]);
     const act = player.actT, down = player.fallen > 0 ? Math.min(1, (1.8 - player.fallen) / .5) : 0, fade = Math.max(.6 * player.burstT ** 2, down);
-    hero.visible = f === 0; shade.visible = enemy.mode !== 'gone';
+    hero.visible = f === 0; shade.visible = enemy.present;
     beasts.forEach((b, i) => { b.visible = i === f - 1; });
     const pose = { p: player.p, yaw: player.yaw, phase: player.phase, run, act, side: player.side, windup: 0, stagger: player.stagger / .45, fade, guard: player.guard, vy: player.v[1], time: t };
     if (f === 0) hero.update(dt, pose, camera.position); else beasts[f - 1].update(dt, pose, camera.position);
@@ -150,6 +150,7 @@ async function boot() {
     else {
       const cp = Math.cos(cam.pitch), dist = cam.dist * [1, 1.2, 1.5, 1.15][f];
       want.set(tgt.x - Math.sin(cam.yaw) * cp * dist, tgt.y - Math.sin(cam.pitch) * dist, tgt.z - Math.cos(cam.yaw) * cp * dist);
+      const cq = [want.x, 0, want.z]; pushOut(cq, .45); want.x = cq[0]; want.z = cq[2]; // the camera does not sit inside a trunk
       want.y = Math.max(want.y, height(want.x, want.z) + .6);
       if (!camReady) eye.copy(want); else eye.lerp(want, 1 - Math.exp(-9 * dt));
     }
@@ -163,7 +164,7 @@ async function boot() {
     // the blade is a line, not a ball: it cuts the smoke only where it actually is, parts it to both sides and thins it along the cut
     const edge = (b, snap) => ({ p: b.a, p2: [0, 1, 2].map(a => b.a[a] + (b.b[a] - b.a[a]) * 1.35), v: b.vel, r: snap ? 1.15 : .6, drag: snap ? 110 : 25, gain: 1.1, reach: 8, split: snap ? 75 : 8, den: snap ? -45 : -4 });
     if (bl) stir.push(edge(bl, bl.snap));
-    if (enemy.mode !== 'gone') stir.push({ p: [enemy.p[0], enemy.p[1] + 1, enemy.p[2]], v: enemy.v, r: 1.7, drag: 30, gain: 1.2 });
+    if (enemy.present) stir.push({ p: [enemy.p[0], enemy.p[1] + 1, enemy.p[2]], v: enemy.v, r: 1.7, drag: 30, gain: 1.2 });
     if (eb) stir.push(edge(eb, eb.snap));
     const e = camera.matrixWorld.elements, tanY = Math.tan(camera.fov * Math.PI / 360), focal = VH / (2 * tanY);
     camera.getWorldDirection(fwd);
@@ -195,9 +196,10 @@ async function boot() {
     // a blink of white and a punch-in of the lens on impact, both gone within a few frames
     flash *= Math.exp(-16 * DT); kick *= Math.exp(-9 * DT); fog.u.flash.value = flash * .55;
     camera.fov = 50 - 6 * kick; camera.updateProjectionMatrix();
+    stage.reeds.time.value = t; stage.reeds.a.value.set(...player.p); stage.reeds.b.value.set(enemy.p[0], enemy.present ? enemy.p[1] : -99, enemy.p[2]);
     fog.u.time.value = t;
     fog.u.hero.value.set(player.p[0], player.p[1] + (f < 2 ? .95 : 0), player.p[2]); fog.u.heroR.value = [1.4, 1.6, 2.4, 1.6][f];
-    fog.u.hero2.value.set(enemy.p[0], enemy.mode === 'gone' ? -99 : enemy.p[1] + .95, enemy.p[2]);
+    fog.u.hero2.value.set(enemy.p[0], !enemy.present ? -99 : enemy.p[1] + .95, enemy.p[2]);
     fog.render();
     frame++;
 
@@ -205,7 +207,7 @@ async function boot() {
     if (frame % 10 === 0) {
       const tot = ms ? Object.values(ms).reduce((a, b) => a + b, 0) : 0;
       const pips = (n, of) => '●'.repeat(Math.max(0, n)) + '○'.repeat(of - Math.max(0, n));
-      let s = `${FORMS[f]}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? enemy.hp : 0, 3)}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
+      let s = `${FORMS[f]}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? enemy.hp : 0, 3)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
       if (drawer) {
         s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n1 人 2 虎 3 鶴 4 鯉 · 左鍵／F 出招 · 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（鶴鯉為下降）\nV 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
         if (ms) s += '\n\n' + Object.entries(ms).map(([k, v]) => `${k.padEnd(18)}${v.toFixed(2)} ms`).join('\n');

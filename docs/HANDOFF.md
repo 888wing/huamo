@@ -259,6 +259,23 @@ Done this round, steps 1 and 2:
 Not done: nothing collides with trees or bushes; the camera can pass through them; the demos do not walk the path;
 the path was not seen clearly in the stills (fog over it). Frame cost unchanged: 8.4 ms at 720p, 11.5 ms at 1080p.
 
+## Round 19 (2026-11-15): step 3 — enemies along the path, solid trees, reeds
+
+Owner: enemies met one at a time along the path; trees must collide; grass should be like Ghost of Tsushima — reeds
+below waist height that move when the figure moves; the grass looked sparse.
+
+- Enemies (`Enemy` in `player.js`): four stations at 20/40/60/80 % of the path (`pathPoint`). Each stands in the fog
+  (`wait`) until the player is within 8.5 m, fights, and when it has melted the next one appears at the next station.
+  After the fourth the enemy is `done`. The corner line shows which of the four is up. Player starts at (1.5, 19).
+- Trees: every ground pine registers its trunk in `OBSTACLES` (`world.js`); `pushOut` keeps the player, the enemy and
+  the camera outside them.
+- Reeds (`stage.js`): about 11,000 instanced tufts of nine blades, 0.75-1.15 m, some with a plume, standing 1.25 m
+  back from the path's centre and thinning with distance from it. The vertex stage sways them in the wind and leans
+  them away from the player and the enemy within 1.8 m. Replaces the 1300 short tufts.
+
+Whole frame on the M4: 8.7 ms at 720p, 12.4 ms at 1080p. Scripted run: all four enemies met in order and defeated.
+Seen in two stills: a dense reed field with the path through it. Reeds leaning from movement was not checked in motion.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

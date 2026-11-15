@@ -1,7 +1,7 @@
 // The three.js side of the world, all drawn as ink on paper: terrain, far mountains, pines, the four bodies and the sword stroke.
 import * as THREE from 'three/webgpu';
-import { Fn, vec2, vec3, float, mix, min, length, smoothstep, normalWorld, positionWorld, positionLocal, texture3D, dot, uniform, attribute, clamp } from 'three/tsl';
-import { SIZE, height, PILLARS, PATH, pathDist } from './world.js';
+import { Fn, vec2, vec3, float, mix, min, length, smoothstep, normalWorld, positionWorld, positionLocal, texture3D, dot, uniform, attribute, clamp, sin } from 'three/tsl';
+import { SIZE, height, PILLARS, PATH, pathDist, OBSTACLES } from './world.js';
 import noiseSrc from './noise.wgsl';
 
 export const INK = new THREE.Color(0x121419), PAPER = new THREE.Color(0xece6d8), SEAL = new THREE.Color(0xb3301f);
@@ -115,7 +115,8 @@ export function buildStage(scene, noise) {
     c.computeVertexNormals(); return c;
   });
   const trunkM = foliageMaterial(noise, .0), padM = foliageMaterial(noise, .02);
-  const pine = (x, z, k, y = height(x, z)) => {
+  const pine = (x, z, k, y) => {
+    if (y === undefined) { OBSTACLES.push([x, z, .15 * k + .12]); y = height(x, z); } // trunks on the ground are solid
     const t = new THREE.Group(), lean = (rnd() - .5) * .5, hgt = (3.2 + rnd() * 2.6) * k;
     const trunk = new THREE.Mesh(trunkG, trunkM); trunk.scale.set(.13 * k, hgt, .13 * k); trunk.position.y = hgt / 2; t.add(trunk);
     for (let i = 0, nl = 4 + (rnd() * 3 | 0); i < nl; i++) {
@@ -144,13 +145,27 @@ export function buildStage(scene, noise) {
     mesh.frustumCulled = false; scene.add(mesh);
   };
   scatter(pads[0], padM, 150, 2.1, .55, .38); scatter(pads[2], padM, 90, 2.4, .85, .5);
-  // a tuft of grass: seven thin leaning blades
-  const tp = [], ti = [];
-  for (let b = 0; b < 7; b++) { const a = b * .9, r = .12 + .1 * (b % 3), lx = Math.cos(a) * r, lz = Math.sin(a) * r, o = tp.length / 3;
-    tp.push(lx - .025, 0, lz, lx + .025, 0, lz, lx * 2.2 + (b % 2 ? .05 : -.05), .26 + .08 * (b % 4), lz * 2.2); ti.push(o, o + 1, o + 2); }
-  const tuft = new THREE.BufferGeometry(); tuft.setAttribute('position', new THREE.Float32BufferAttribute(tp, 3)); tuft.setIndex(ti); tuft.computeVertexNormals();
-  const grassM = basic(wash(float(.08))); grassM.side = THREE.DoubleSide;
-  scatter(tuft, grassM, 1300, 1.5, .95, 1.0);
+  // reeds, waist-high and dense, like a field of pampas grass: they sway in the wind and lean away from whoever wades through
+  const rp = [], ri = [];
+  for (let b = 0; b < 9; b++) {
+    const a = b * .7, r = .05 + .09 * (b % 3), lx = Math.cos(a) * r, lz = Math.sin(a) * r, hgt = .75 + .13 * (b % 4), tx = lx * 3 + (b % 2 ? .1 : -.1), tz = lz * 3; let o = rp.length / 3;
+    rp.push(lx - .02, 0, lz, lx + .02, 0, lz, tx, hgt, tz); ri.push(o, o + 1, o + 2);
+    if (b % 3 === 0) { o = rp.length / 3; rp.push(tx - .026, hgt - .02, tz, tx + .026, hgt - .02, tz, tx + .03, hgt + .17, tz + .02); ri.push(o, o + 1, o + 2); } // a plume
+  }
+  const reed = new THREE.InstancedBufferGeometry(); reed.setAttribute('position', new THREE.Float32BufferAttribute(rp, 3)); reed.setIndex(ri);
+  const RN = 11000, ip = new Float32Array(RN * 4); let rn = 0;
+  for (let i = 0; i < RN * 30 && rn < RN; i++) { const x = (rnd() - .5) * 44, z = (rnd() - .5) * 52, d = pathDist(x, z); if (!clear(x, z, 1.25) || rnd() > 1.6 / (1 + d * .14)) continue; ip.set([x, height(x, z) - .04, z, .8 + rnd() * .6], rn++ * 4); }
+  reed.setAttribute('ipos', new THREE.InstancedBufferAttribute(ip.subarray(0, rn * 4), 4)); reed.instanceCount = rn;
+  const ru = { time: uniform(0), a: uniform(new THREE.Vector3()), b: uniform(new THREE.Vector3(0, -99, 0)) };
+  const rm = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+  const I = attribute('ipos', 'vec4'), up = positionLocal.y, root = I.xyz;
+  const lean = c => { const o = root.xz.sub(c.xz), d = length(o); return o.div(d.add(.01)).mul(smoothstep(1.8, .2, d)).mul(smoothstep(2.2, 0, root.y.sub(c.y).abs())); };
+  const wind = vec2(sin(ru.time.mul(1.5).add(root.x.mul(.45)).add(root.z.mul(.3))), sin(ru.time.mul(1.1).add(root.z.mul(.5)))).mul(.1);
+  const bend = wind.add(lean(ru.a).mul(.8)).add(lean(ru.b).mul(.8)).mul(up.mul(up));
+  rm.positionNode = vec3(positionLocal.x.add(bend.x), up.sub(length(bend).mul(.35)), positionLocal.z.add(bend.y)).mul(I.w).add(root);
+  rm.colorNode = wash(mix(.08, .4, up.div(1.1)).add(texture3D(noise, root.mul(.3)).b.sub(.5).mul(.25)));
+  const reeds = new THREE.Mesh(reed, rm); reeds.frustumCulled = false; scene.add(reeds);
+  return { reeds: ru };
 }
 
 // The four bodies. Flat ink silhouettes with one vermilion accent each.
