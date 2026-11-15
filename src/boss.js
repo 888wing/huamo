@@ -89,12 +89,12 @@ export class Giant {
     }
     return ev;
   }
-  canHurt(pl) { return pl.dodge <= 0 && pl.burst <= 0 && pl.fallen <= 0; }
+  canHurt(pl) { return !pl.invuln; }
+  // everything the giant does throws the player off their feet; a guard does not hold against it
   hurt(pl, from, power, throwBack, ev) {
     const dx = pl.p[0] - from[0], dz = pl.p[2] - from[2], l = Math.hypot(dx, dz) || 1;
-    pl.hp -= power; pl.stagger = .6; pl.v[0] = dx / l * throwBack; pl.v[2] = dz / l * throwBack; pl.v[1] = 5; pl.ground = false;
-    if (pl.hp <= 0) pl.fallen = 1.8;
-    ev.push({ kind: 'struck', at: [pl.p[0], pl.p[1] + 1.2, pl.p[2]], dir: [dx / l, dz / l], down: pl.hp <= 0 });
+    const down = pl.hurt(3, from, power, throwBack);
+    ev.push({ kind: 'struck', at: [pl.p[0], pl.p[1] + 1.2, pl.p[2]], dir: [dx / l, dz / l], down });
   }
 
   // what a sword stroke can reach: the hand while it lies on the ground, otherwise the nearer ankle

@@ -400,6 +400,50 @@ Found and left for the owner to decide:
 The plan for the next three pieces of work (player motion, beast transitions, the giant's staging and the climb to
 its head) is in [PLAN-NEXT.md](PLAN-NEXT.md) (Chinese).
 
+## Round 22 (2026-11-15): the swordsman's motion
+
+The owner's answers to the plan's questions: carp = guard pressed again while guarding; one shared ink gauge for the
+beasts; the giant dies to one stab (a game-jam slice, keep it short); brush onomatopoeia yes; sound after all the
+visuals; shadows get more health. Then the first item of [PLAN-NEXT.md](PLAN-NEXT.md) was built.
+
+- `figure.js`, `update()` rewritten. The pose is built in four layers, each laid over the one before with a weight:
+  ground (stand, walk, the leaning run), air (rise, top, fall, landing), action (guard, block, parry, the three
+  strokes exactly as the Codex session posed them, hop, roll, the stab from the air), reaction (a cut from any side,
+  a heavy blow, thrown and getting up, dying). Bones follow their targets on springs (stiffness per state, damping
+  ratio 0.8), so poses overshoot a little and settle.
+- **Planted feet.** `plant()` keeps a world point per foot. A planted foot does not move; when the body has gone on
+  by half a stride it lifts, swings to where the body will be, and plants again (the foot furthest behind goes
+  first; in a run the next may leave before the last lands). `reachLeg()` is a two-bone solver with the knee
+  forward. The hips are held low enough for both planted feet to be reached: that is the walk's rise and fall. Legs
+  are posed directly (no solver) in the air, in strokes, rolls and falls; the feet's memory follows them, so there
+  is no jump when the solver takes over again. The shadows use the same code.
+- Root motion: `pitch` turns the body about a `pivot` above the feet (a roll goes over its own middle), `roll` banks
+  it into turns from the yaw rate, lean follows speed and acceleration.
+- The sword can be held point down (`grip`): its world orientation is set upright whatever the arm does. Used by the
+  stab and by the kneel before dying. The sheathed sword now points backwards (it pointed forwards since round 3).
+- `player.js`: `Player.hurt(kind, from, power, back)` is the one way in for damage (1 a cut, 2 heavy, 3 thrown);
+  `invuln` replaces the bare `dodge > 0` tests; `pose()` hands the figure everything it needs; `events` tells
+  `main.js` about jumps, landings, the stab and being floored, which become bursts in the fog. Jump height follows
+  how long the key is held. Dodge with no direction is a hop back (0.30 s, 3.2 m, untouchable 0.05-0.22 s); with a
+  direction a roll (0.42 s, 4.2 m, untouchable 0.06-0.30 s); a press of attack late in a dodge cuts straight out of
+  it. Attack in the air is the stab downwards (2 damage where it lands). A parry opens the enemy to double damage
+  for 0.9 s. Thrown: in the air, 0.35 s down, 0.6 s getting up (untouchable from landing); jump pressed in the air
+  lands it standing. Death takes 2.6 s (`DEATH`), slowed at the start, and bleeds ink into the 3D fog.
+- The giant's blows now throw the player (`pl.hurt(3, ...)`). Shadows have 6 health (`maxHp`).
+- Demo `moves` (`MOVE_SEQ` in `demos.js`); `tools/check-moves.mjs` measures it; `tools/strip.sh` makes a close-up
+  strip of any stretch of a demo; `tools/moves-times.mjs` prints when each move starts.
+
+Measured by `check-moves.mjs`: 85 stances, a planted foot slides 0.5 cm on average and 4.0 cm at worst (one stance,
+in the tight circle); hop 3.33 m in 0.30 s, roll 4.32 m in 0.42 s; a tapped jump reaches 1.05 m, a held one 1.75 m;
+thrown and back in control in 1.55 s, or 0.35 s with the recovery; death to standing again 2.9 s.
+Regression on the procedural build after the change, no console errors: `spar` (the four shadows, now 6 health each,
+down in 37 s), `ward`, `journey` to 110 s, `boss`, `stand`. Whole frame, tour demo: 8.3 ms at 720p, 11.1 ms at 1080p.
+`dist/smoke-procedural.html` 986.8 KB raw, 287.9 KB gzip (5 KB more than round 21); `dist/index.html` 382.7 KB gzip.
+
+Not done from the plan's first item: the skid when stopping from a run has no pose of its own (the lean follows the
+deceleration, nothing more); a hard landing rolls only when the fall is faster than 13 m/s, which nothing in the
+slice reaches yet; the hat does not lag behind the head. Seen only as frame strips and in two recordings, not played.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

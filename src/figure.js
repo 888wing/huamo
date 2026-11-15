@@ -6,8 +6,13 @@ import { Fn, vec3, float, mix, smoothstep, normalWorld, normalView, positionWorl
 import { wash, basic, SEAL } from './stage.js';
 import { Strips } from './strips.js';
 import { swing, swordTiming } from './player.js';
+import { height } from './world.js';
 
 const sun = vec3(.45, .8, .35).normalize();
+const ZERO = [0, 0, 0], AX = ['x', 'y', 'z'], X = new THREE.Vector3(1, 0, 0), UP = new THREE.Vector3(0, 1, 0);
+const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3(), v4 = new THREE.Vector3(), v5 = new THREE.Vector3(), v6 = new THREE.Vector3();
+const q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), q3 = new THREE.Quaternion(), qYaw = new THREE.Quaternion(), m4 = new THREE.Matrix4();
+const wrap = a => Math.atan2(Math.sin(a), Math.cos(a)), cl = x => Math.min(1, Math.max(0, x)), sm = (x, a, b) => { const k = cl((x - a) / (b - a)); return k * k * (3 - 2 * k); };
 
 // washed cloth or skin: streaks run along the limb, the rim turns to ink like a drawn outline
 export const cloth = (noise, tone, grain = 1) => basic(Fn(() => {
@@ -123,7 +128,7 @@ export class Figure {
     this.glow = uniform(0);
     const blade = basic(mix(wash(float(.55)), uniform(new THREE.Color(SEAL)), this.glow));
     const bones = this.bones = [];
-    const bone = (parent, x, y, z) => { const b = new THREE.Group(); b.position.set(x, y, z); b.t = [0, 0, 0]; parent.add(b); bones.push(b); return b; };
+    const bone = (parent, x, y, z) => { const b = new THREE.Group(); b.position.set(x, y, z); b.t = [0, 0, 0]; b.vel = [0, 0, 0]; parent.add(b); bones.push(b); return b; };
     const add = (parent, geo, mat, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1, rx = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.x = rx; parent.add(m); return m; };
     const seam = (parent, mat, start, end, width, depth) => {
       const offset = new THREE.Vector3(...start), direction = new THREE.Vector3(...end).sub(offset);
@@ -186,10 +191,10 @@ export class Figure {
         seam(B.head, M.hood, [side * .013, .052, .122], [side * .061, .035, .105], .01, .014);
         seam(B.head, M.lapel, [side * .128, .143, .038], [side * .047, -.026, .065], .012, .013);
       }
-      add(B.head, shapes.hat, M.hat);
+      this.hat = add(B.head, shapes.hat, M.hat);
     } else {
       add(B.head, box, M.cloak, 0, .115, .092, .12, .012, .02);
-      add(B.head, cone, M.hat, 0, .23, 0, .44, .17, .44);
+      this.hat = add(B.head, cone, M.hat, 0, .23, 0, .44, .17, .44);
     }
     add(B.head, ball, M.cloak, 0, .33, -.02, .045, .05, .045);                        // topknot
     this.eyes = [add(B.head, ball, red, .04, .1, .1, .014, .012, .01), add(B.head, ball, red, -.04, .1, .1, .014, .012, .01)];
@@ -226,7 +231,7 @@ export class Figure {
       return s;
     };
     this.drawn = sword(B.handR); this.drawn.position.y = -.04;
-    this.sheathed = sword(B.hips, true); this.sheathed.position.set(.2, .12, .02); this.sheathed.rotation.set(-1.2, 0, .12);
+    this.sheathed = sword(B.hips, true); this.sheathed.position.set(.2, .1, .1); this.sheathed.rotation.set(1.22, 0, .12); // hilt forward at the hip, the scabbard running back
 
     // cloth strips: [bone, anchor x y z, rest direction x y z (figure space), length, width at top, width at hem, tone]
     const S = [];
@@ -244,24 +249,108 @@ export class Figure {
     }
     this.cloth = new Strips(scene, noise, S, { rad: .2, top: 1.3, stiff: 1 });
     this.tip = new THREE.Vector3();
+    // each foot remembers where it stands in the world and steps when the body has moved on; `t` < 1 while it is in the air
+    this.feet = [1, -1].map(side => ({ s: side, k: side > 0 ? 'L' : 'R', pos: new THREE.Vector3(), from: new THREE.Vector3(), t: 1, T: .2, err: 0 }));
+    this.fresh = true; this.ikW = 0; this.airW = 0; this.gripW = 0; this.acc = 0; this.bank = 0; this.pFwd = 0; this.pYaw = 0; this.hipV = 0;
+    this.hatSize = this.hat.scale.clone();
   }
 
-  set visible(v) { if (v && !this.group.visible) this.cloth.fresh = true; this.group.visible = this.cloth.mesh.visible = v; }
+  set visible(v) { if (v && !this.group.visible) this.cloth.fresh = this.fresh = true; this.group.visible = this.cloth.mesh.visible = v; }
 
-  // st: { p, yaw, phase, run 0..1, act -1|0..1, combo, side, windup 0..1, stagger 0..1, fade 0..1 }
+  // Where the feet stand. A planted foot stays put in the world; when the body has gone on far enough it lifts, swings
+  // to where the body is about to be, and plants again. Works the same forwards, backwards and sideways, so nothing slides.
+  plant(h, st, sp, gk) {
+    const { p, yaw } = st, v = st.v ?? ZERO, sy = Math.sin(yaw), cy = Math.cos(yaw);
+    if (this.ikW < .05 || this.fresh) { // legs posed directly (a stroke, a roll, the air): the feet's memory just follows them
+      for (const f of this.feet) { this.B['foot' + f.k].getWorldPosition(f.pos); f.pos.y = height(f.pos.x, f.pos.z); f.t = 1; f.err = 0; }
+      this.fresh = false; return;
+    }
+    const stride = .5 + .17 * sp, T = Math.max(.13, Math.min(.3, stride / Math.max(sp, 1) * .55)), dx = sp > .05 ? v[0] / sp : 0, dz = sp > .05 ? v[2] / sp : 0;
+    const ahead = Math.min(stride * .45, .42), due = sp > .3 ? Math.min(stride * .5, .45) : .13;
+    for (let i = 0; i < 2; i++) {
+      const f = this.feet[i], o = this.feet[1 - i], lat = f.s * (.11 + .07 * gk), fw = f.s * .17 * gk; // on guard the stance widens and the left foot leads
+      const hx = p[0] + cy * lat + sy * fw, hz = p[2] - sy * lat + cy * fw;
+      if (f.t >= 1) {
+        f.err = Math.hypot(hx - f.pos.x, hz - f.pos.z);
+        // the foot left furthest behind goes first; in a run the next may leave before the last has landed
+        // (a foot the leg can no longer reach leaves at once, whatever the other is doing)
+        if (f.err > .62 || (f.err > due && (o.t >= 1 ? f.err >= o.err - .01 : o.t > .55 && sp > 3.4))) { f.from.copy(f.pos); f.t = 0; f.T = T; f.err = 0; }
+      }
+      if (f.t < 1) {
+        f.t = Math.min(1, f.t + h / f.T);
+        const rem = (1 - f.t) * f.T, tx = hx + v[0] * rem + dx * ahead, tz = hz + v[2] * rem + dz * ahead, e = f.t * f.t * (3 - 2 * f.t);
+        f.pos.set(f.from.x + (tx - f.from.x) * e, 0, f.from.z + (tz - f.from.z) * e);
+        f.pos.y = height(f.pos.x, f.pos.z) + (.05 + .17 * Math.min(1, sp / 5.5)) * Math.sin(Math.PI * f.t);
+      }
+    }
+  }
+  // Bends one leg so its ankle stands on the foot's point: the knee goes forward and a little out. w blends it over the posed leg.
+  reachLeg(f, w) {
+    const { B, group: g } = this, th = B['thigh' + f.k], sh = B['shin' + f.k], ft = B['foot' + f.k], sc = g.scale.x, l1 = .44 * sc, l2 = .42 * sc;
+    th.getWorldPosition(v1); v2.set(f.pos.x, f.pos.y + .045 * sc, f.pos.z).sub(v1);
+    const dist = Math.min(l1 + l2 - .004, Math.max(.2, v2.length())); v2.normalize();
+    const A = Math.acos((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist)), E = Math.acos((l1 * l1 + l2 * l2 - dist * dist) / (2 * l1 * l2));
+    v3.set(f.s * .25, .1, 1).applyQuaternion(qYaw); v4.copy(v3).cross(v2).normalize();          // v4: the axis the knee bends about, the bone's own X
+    v5.copy(v2).applyAxisAngle(v4, -A).negate(); v6.copy(v4).cross(v5);
+    q1.setFromRotationMatrix(m4.makeBasis(v4, v5, v6)); th.parent.getWorldQuaternion(q2); th.quaternion.slerp(q3.copy(q2).invert().multiply(q1), w);
+    sh.quaternion.slerp(q1.setFromAxisAngle(X, Math.PI - E), w);
+    th.updateMatrixWorld(true); sh.getWorldQuaternion(q2);
+    q1.copy(qYaw).multiply(q3.setFromAxisAngle(X, f.t < 1 ? .55 * Math.sin(Math.PI * f.t) : 0)); // the toes hang while the foot swings
+    ft.quaternion.slerp(q3.copy(q2).invert().multiply(q1), w);
+  }
+
+  // st: what Player.pose() returns. The enemy passes the same shape with fewer fields ({ p, v, yaw, act, side, windup, stagger, fall, melt, fade, eyes, time }).
+  // The pose is built in four layers, each laid over the one before: moving on the ground, the air, an action
+  // (guard, stroke, dodge, the stab from the air), a reaction (a blow, being thrown, dying). Bones then follow their
+  // targets on springs, so every change of pose overshoots a little and settles.
   update(dt, st, cam) {
     const { B, group: g } = this, set = (b, x = 0, y = 0, z = 0) => { b.t[0] = x; b.t[1] = y; b.t[2] = z; };
-    const w = st.phase * 1.9, r = st.run, sw = Math.sin(w), cw = Math.cos(w), t = st.act, s = st.side;
+    const mixTo = (b, x, y, z, w) => { b.t[0] += (x - b.t[0]) * w; b.t[1] += (y - b.t[1]) * w; b.t[2] += (z - b.t[2]) * w; };
+    const v = st.v ?? ZERO, yaw = st.yaw, sy = Math.sin(yaw), cy = Math.cos(yaw), h = Math.min(dt, 1 / 30);
+    const sp = Math.hypot(v[0], v[2]), fwd = v[0] * sy + v[2] * cy, fast = sm(sp, 3.2, 5.3), moving = sm(sp, .15, 1.2);
+    const t = st.act, s = st.side, ground = st.ground ?? true, gk = st.guardK ?? 0;
+    // how hard the body is speeding up, slowing or turning: it leans into all three
+    if (h > 1e-4) {
+      this.acc += (Math.max(-40, Math.min(40, (fwd - this.pFwd) / h)) - this.acc) * Math.min(1, 9 * h);
+      this.bank += (Math.max(-.32, Math.min(.32, -wrap(yaw - this.pYaw) / h * sp * .016)) - this.bank) * Math.min(1, 7 * h);
+    }
+    this.pFwd = fwd; this.pYaw = yaw;
     for (const b of this.bones) set(b);
-    // gait
-    let hipY = .92 - .05 * r + Math.abs(sw) * .05 * r, lean = .06 + .2 * r, twist = 0;
-    set(B.thighL, -sw * .8 * r, 0, .04); set(B.thighR, sw * .8 * r, 0, -.04);
-    set(B.shinL, .08 + Math.max(0, cw) * 1.2 * r); set(B.shinR, .08 + Math.max(0, -cw) * 1.2 * r);
-    set(B.armL, sw * .7 * r, 0, .16); set(B.armR, -sw * .7 * r, 0, -.16);
-    set(B.foreL, -.3 - .5 * r); set(B.foreR, -.3 - .5 * r);
-    set(B.spine, .03 * Math.sin(st.time * 1.4)); set(B.head, -.1 * r);
-    const drawn = t >= 0 || st.windup > 0 || !!st.guard;
-    if (st.guard) { set(B.armR, -1.25, 0, .45); set(B.foreR, -1.25); set(B.armL, -1.0, 0, -.35); set(B.foreL, -1.2); hipY -= .08; } // sword raised across the body
+    // which foot is forward: the arms and the shoulders answer it
+    const off = f => (f.pos.x - st.p[0]) * sy + (f.pos.z - st.p[2]) * cy, gs = Math.max(-1, Math.min(1, (off(this.feet[1]) - off(this.feet[0])) / .62)) * moving;
+
+    // ---- on the ground: standing, walking, the leaning run
+    let hipY = .9 - .03 * fast, lean = .04 + .1 * moving + .4 * fast + (ground ? Math.max(-.3, Math.min(.22, this.acc * .011)) : 0), twist = -gs * .16;
+    let roll = this.bank, pitch = 0, pivot = 0, rootY = 0, ik = 1, stiff = 420, headX = 0, headY = 0, headZ = 0, curl = 0, grip = 0, hatTilt = 0;
+    let melt = st.melt ?? 0, fade = st.fade ?? 0;
+    set(B.thighL, -.06, 0, .04); set(B.thighR, -.06, 0, -.04); set(B.shinL, .12); set(B.shinR, .12);
+    // the left hand rides the scabbard; the right swings with the stride, and trails behind in the run
+    set(B.armL, .12 - .2 * gs * (1 - fast), 0, .2); set(B.foreL, -.75 - .25 * fast);
+    set(B.armR, .5 * gs * (1 - .5 * fast) + .45 * fast, 0, -.16 - .12 * fast); set(B.foreR, -.3 - .35 * moving - .15 * fast);
+    set(B.spine, .03 * Math.sin(st.time * 1.4));
+
+    // ---- in the air: one knee up on the way up, both tucked at the top, legs reaching for the ground on the way down
+    this.airW += ((ground ? 0 : 1) - this.airW) * Math.min(1, h / .07);
+    const aw = this.airW;
+    if (aw > .01) {
+      const vy = st.vy ?? 0, up = sm(vy, 1, 6), dn = sm(-vy, 1.5, 8), top = Math.max(0, 1 - up - dn), L3 = (a, b, c) => a * up + b * top + c * dn;
+      mixTo(B.thighL, L3(-1.2, -1.35, -.35), 0, .06, aw); mixTo(B.shinL, L3(1.55, 1.9, .5), 0, 0, aw);
+      mixTo(B.thighR, L3(.35, -1.0, -.5), 0, -.06, aw); mixTo(B.shinR, L3(.6, 1.7, .75), 0, 0, aw);
+      mixTo(B.armL, L3(-.7, -.25, -1.1), 0, L3(.75, 1.25, 1.0), aw); mixTo(B.foreL, L3(-.6, -.3, -.5), 0, 0, aw);
+      mixTo(B.armR, L3(-.4, -.25, -.95), 0, L3(-.9, -1.25, -1.0), aw); mixTo(B.foreR, L3(-.5, -.3, -.5), 0, 0, aw);
+      lean += (L3(.2, .06, -.06) - lean) * aw; twist *= 1 - aw; ik = Math.min(ik, 1 - aw);
+    }
+    // coming down: the knees take it (the feet are planted, so lowering the hips is all it needs)
+    if (st.land > 0 && !st.landHard) { const e = Math.sin(Math.PI * cl(1 - st.land / .14)); hipY -= .27 * e; lean += .22 * e; mixTo(B.armL, -.2, 0, .7, e * .6); mixTo(B.armR, -.2, 0, -.7, e * .6); }
+
+    // ---- actions
+    const drawn = t >= 0 || st.windup > 0 || gk > .3 || !!st.guard || st.plunge > 0 || (st.death > 0 && st.death < .6) || st.parryT > 0;
+    if (gk > .01) { // on guard: sword raised across the body, the body turned side-on behind it
+      mixTo(B.armR, -1.25, 0, .45, gk); mixTo(B.foreR, -1.25, 0, 0, gk); mixTo(B.armL, -1.0, 0, -.35, gk); mixTo(B.foreL, -1.2, 0, 0, gk);
+      hipY -= .08 * gk; twist += .3 * gk; lean += (.1 - lean) * gk * .6;
+    }
+    if (st.blockT > 0) { const e = Math.sin(Math.PI * cl(1 - st.blockT / .25)); mixTo(B.armR, -.9, 0, .55, e); mixTo(B.foreR, -1.85, 0, 0, e); mixTo(B.foreL, -1.7, 0, 0, e); lean -= .22 * e; hipY -= .07 * e; stiff = 900; } // a blow taken on the sword: the arms give
+    if (st.parryT > 0) { const e = Math.sin(Math.PI * cl(1 - st.parryT / .32)); mixTo(B.armR, -1.55, 0, -1.2, e); mixTo(B.foreR, -.25, 0, 0, e); twist -= .75 * e; lean += .12 * e; stiff = 1100; }  // turned aside: the sword sweeps out
     if (st.windup > 0) { // sword raised: the tell before a strike
       const k = Math.sin(Math.min(1, st.windup) * 1.57);
       set(B.armR, -2.7 * k, 0, -.25); set(B.foreR, -.5 * k); set(B.armL, -.9 * k, 0, .3); twist = -s * .5 * k; hipY -= .06 * k; lean -= .12 * k;
@@ -292,22 +381,91 @@ export class Figure {
         hipY += .12 * (1 - e) - .09 * e;
         lean += -.30 * (1 - e) + .26 * e;
       }
-      set(B.head, -.12, -twist * .45);
+      headX = -.12 + lean * .6; headY = -twist * .45; ik = 0; stiff = 1300;
     }
-    if (st.stagger > 0) { const k = st.stagger; lean -= .55 * k; hipY -= .08 * k; set(B.armL, -.6 * k, 0, 1.0 * k); set(B.armR, -.4 * k, 0, -1.0 * k); set(B.head, .35 * k); }
-    const fall = st.fall ?? 0, melt = st.melt ?? 0, fe = fall * fall * (3 - 2 * fall);
-    if (fall > 0) { lean = -.2; set(B.armL, -.5, 0, 1.35); set(B.armR, -.5, 0, -1.35); set(B.thighL, -.3); set(B.thighR, .25); set(B.shinL, .5); set(B.head, .3); } // cut down: arms flung wide
-    set(B.hips, lean, twist * .3); set(B.chest, .05, twist * .7);
-    const k = 1 - Math.exp(-(t >= 0 ? 34 : 16) * dt);
-    for (const b of this.bones) { b.rotation.x += (b.t[0] - b.rotation.x) * k; b.rotation.y += (b.t[1] - b.rotation.y) * k; b.rotation.z += (b.t[2] - b.rotation.z) * k; }
-    B.hips.position.y += (hipY - B.hips.position.y) * k;
+    const dk = st.dodgeKind ?? 0, hardRoll = st.land > 0 && st.landHard;
+    if (dk === 1) { // the hop back: knees up, the body low and still facing what it is backing away from
+      const e = Math.sin(Math.PI * cl(st.dodgeU)); rootY += .3 * e; ik = 0; stiff = 800; hipY -= .12 * e; lean = .12 + .28 * e;
+      set(B.thighL, -.2 - .75 * e, 0, .08); set(B.shinL, .25 + 1.1 * e); set(B.thighR, .1 - .55 * e, 0, -.08); set(B.shinR, .4 + .8 * e);
+      mixTo(B.armL, -.9, 0, .55, e); mixTo(B.armR, .45, 0, -.7, e);
+    }
+    if (dk === 2 || hardRoll) { // the roll: tucked into a ball and once over, turning about its own middle
+      const u = dk === 2 ? st.dodgeU : 1 - st.land / .4, tk = Math.sin(Math.PI * cl(u / .92)) ** .6;
+      pitch = 6.2832 * sm(u, .04, .9); pivot = .5; ik = 0; stiff = 900; twist = 0; roll = 0; hipY -= .32 * tk; lean = .1 + .75 * tk; curl = .45 * tk; headX = .55 * tk;
+      set(B.thighL, -1.95 * tk - .1, 0, .1); set(B.shinL, 2.3 * tk + .1); set(B.thighR, -1.85 * tk - .1, 0, -.1); set(B.shinR, 2.25 * tk + .1);
+      mixTo(B.armL, -1.35, 0, -.25, tk); mixTo(B.foreL, -1.7, 0, 0, tk); mixTo(B.armR, -1.35, 0, .25, tk); mixTo(B.foreR, -1.7, 0, 0, tk);
+    }
+    const pg = st.plunge ?? 0;
+    if (pg) { // the stab from the air: both hands on the hilt, the point straight down, the body curled over it; then crouched over the sword in the ground
+      const stuck = pg === 2, rise = stuck ? sm(st.plungeT / .38, .55, 1) : 0; ik = stuck ? 1 : 0; stiff = 900; grip = 1 - rise; twist = 0;
+      mixTo(B.armR, stuck ? -.55 : -1.05, 0, .3, 1 - rise); mixTo(B.foreR, stuck ? -.35 : -.6, 0, 0, 1 - rise); mixTo(B.armL, stuck ? -.6 : -1.05, 0, -.3, 1 - rise); mixTo(B.foreL, stuck ? -.4 : -.6, 0, 0, 1 - rise);
+      if (stuck) { hipY -= .36 * (1 - rise); lean = .5 * (1 - rise) + .05; }
+      else { set(B.thighL, -1.1, 0, .1); set(B.shinL, 1.7); set(B.thighR, -.5, 0, -.1); set(B.shinR, 1.3); lean = .32; }
+    }
+
+    // ---- reactions
+    if (st.hurtU >= 0) { // a blow: the body gives way from where it landed, most at once and then recovering
+      const k = Math.sin(Math.PI * Math.pow(st.hurtU, .42)) * (st.hurtKind === 2 ? 1.5 : 1), [left, front] = st.hurtDir, w = Math.min(1, k);
+      lean -= .5 * k * front; roll += .42 * k * left; twist += .5 * k * left; hipY -= .07 * k; stiff = 800; headX += .4 * k * front; headZ = -.3 * k * left; hatTilt = .3 * k;
+      mixTo(B.armL, -.5, 0, 1.0, w); mixTo(B.armR, -.35, 0, -1.0, w);
+    }
+    if (st.stagger > 0) { const k = st.stagger; lean -= .55 * k; hipY -= .08 * k; set(B.armL, -.6 * k, 0, 1.0 * k); set(B.armR, -.4 * k, 0, -1.0 * k); headX += .35 * k; }
+    const ko = st.ko ?? 0;
+    if (ko) { // thrown: over backwards through the air, flat on its back, then up through a crouch
+      const u = ko === 1 ? sm(st.koT, 0, .32) : ko === 2 ? 1 : 1 - sm(st.koT, .05, .5), up = ko === 3 ? 1 - u : 0;
+      ik = 0; stiff = 700; pitch = -1.5 * u; rootY += .17 * u; lean = -.15 * u; twist = 0; roll = 0; headX = .35 * u; hatTilt = .25 * u;
+      set(B.armL, -.5, 0, 1.3 * u + .2); set(B.armR, -.5, 0, -1.3 * u - .2); set(B.foreL, -.4); set(B.foreR, -.4);
+      set(B.thighL, -.45 - .75 * up, 0, .12); set(B.shinL, .7 + .9 * up); set(B.thighR, .2 - 1.1 * up, 0, -.12); set(B.shinR, .5 + 1.0 * up);
+      if (ko === 3) hipY -= .38 * Math.sin(Math.PI * cl(st.koT / .6));
+    }
+    const fall = st.fall ?? 0, fe = fall * fall * (3 - 2 * fall);
+    if (fall > 0) { lean = -.2; ik = 0; set(B.armL, -.5, 0, 1.35); set(B.armR, -.5, 0, -1.35); set(B.thighL, -.3); set(B.thighR, .25); set(B.shinL, .5); headX = .3; } // the shadow, cut down: arms flung wide
+    const dd = st.death ?? 0;
+    if (dd > 0) { // the end: down on one knee with the sword planted, forwards onto the ground, and out into ink; the hat is the last of it
+      const kneel = sm(dd, 0, .16), drop = sm(dd, .26, .46); ik = 0; stiff = 300; grip = kneel * (1 - drop); twist = 0; roll = 0;
+      hipY = .9 - .4 * kneel; lean = .1 * kneel + .25 * sm(dd, .12, .26); headX = .55 * kneel; pitch = 1.42 * drop; rootY += .1 * drop;
+      set(B.thighL, -1.5 * kneel, 0, .1); set(B.shinL, 1.55 * kneel); set(B.thighR, -.1 * kneel, 0, -.08); set(B.shinR, 1.6 * kneel);
+      set(B.armR, -.85 * kneel * (1 - drop) - .3 * drop, 0, -.15 - .9 * drop); set(B.foreR, -.45 * kneel); set(B.armL, .1 - .4 * drop, 0, .15 + .9 * drop); set(B.foreL, -.3);
+      melt = Math.max(melt, sm(dd, .5, .9)); fade = Math.max(fade, sm(dd, .84, .98) * .93);
+    }
+    set(B.hips, lean, twist * .3); mixTo(B.spine, B.spine.t[0] + curl, 0, 0, 1); set(B.chest, .05 + curl, twist * .7);
+    set(B.head, -lean * .6 + .03 * Math.sin(st.time * .9) + headX, headY, headZ);
+
+    // ---- bones follow their targets on springs; the hips' height too
+    const C = 1.6 * Math.sqrt(stiff), legs = this.ikW > .5;
+    for (const b of this.bones) for (let a = 0; a < 3; a++) { const ax = AX[a]; b.vel[a] += (stiff * (b.t[a] - b.rotation[ax]) - C * b.vel[a]) * h; b.rotation[ax] += b.vel[a] * h; }
+    if (legs) for (const k of ['thighL', 'thighR', 'shinL', 'shinR', 'footL', 'footR']) B[k].vel.fill(0);
+    // the hips come down as far as the legs need to reach both feet: that is the rise and fall of a walk
+    const sc = 1.04 * (1 - .7 * fade), L = .86 * sc;
+    let cap = 9;
+    if (ik > .5 && this.ikW > .5) for (const f of this.feet) if (f.t >= 1) {
+      const d = Math.hypot(f.pos.x - (st.p[0] + cy * f.s * .1), f.pos.z - (st.p[2] - sy * f.s * .1));
+      cap = Math.min(cap, (Math.sqrt(Math.max(.04, L * L - d * d)) + .05 * sc + f.pos.y - st.p[1]) / sc + .02);
+    }
+    this.hipV += (stiff * (Math.min(hipY, cap) - B.hips.position.y) - C * this.hipV) * h; B.hips.position.y += this.hipV * h;
+    if (B.hips.position.y > cap) { B.hips.position.y = cap; this.hipV = Math.min(0, this.hipV); } // never so high that a planted foot would be pulled off its place
     this.drawn.visible = drawn; this.sheathed.visible = !drawn;
     this.glow.value += ((st.windup > 0 ? 1 : 0) - this.glow.value) * Math.min(1, 14 * dt);
     this.eyes.forEach(e => { e.visible = !!st.eyes; });
-    // falling: the whole figure tips onto its back; melting: it flattens and spreads like ink soaking into paper
-    const sc = 1.04 * (1 - .7 * (st.fade ?? 0));
-    g.position.set(st.p[0], st.p[1] + .17 * fe, st.p[2]); g.rotation.y = st.yaw; g.rotation.x = -1.5 * fe; g.scale.set(sc * (1 + .35 * melt), sc * (1 + .12 * melt), sc * (1 - .9 * melt));
+    this.hat.rotation.x += (hatTilt - this.hat.rotation.x) * Math.min(1, 12 * h);
+    this.hat.scale.copy(this.hatSize).multiplyScalar(dd > .5 ? Math.min(3.3, 1.04 / sc) : 1); // the hat keeps its size while the body under it goes
+
+    // ---- place the body. `pitch` turns it about a point `pivot` above the feet (a roll goes over its own middle, not over its heels);
+    // falling tips the whole figure onto its back; melting flattens and spreads it like ink soaking into paper
+    const py = pivot * (1 - Math.cos(pitch)), pz = -pivot * Math.sin(pitch);
+    g.position.set(st.p[0] + sy * pz, st.p[1] + rootY + py + .17 * fe, st.p[2] + cy * pz);
+    g.rotation.set(pitch - 1.5 * fe, yaw, roll);
+    g.scale.set(sc * (1 + .35 * melt), sc * (1 + .12 * melt), sc * (1 - .9 * melt));
     g.updateMatrixWorld(true);
+    // ---- legs: on the ground they reach for the feet's planted points
+    qYaw.setFromAxisAngle(UP, yaw);
+    this.ikW += (ik - this.ikW) * Math.min(1, h / .07);
+    this.plant(h, st, sp, gk);
+    if (this.ikW > .01) { for (const f of this.feet) this.reachLeg(f, this.ikW); g.updateMatrixWorld(true); }
+    // held point down (the stab, the kneel): the sword stands upright in the world whatever the arm is doing
+    this.gripW += (grip - this.gripW) * Math.min(1, h / .06);
+    this.drawn.quaternion.identity();
+    if (this.gripW > .01) { B.handR.getWorldQuaternion(q2); this.drawn.quaternion.slerp(q3.copy(q2).invert().multiply(qYaw), this.gripW); this.drawn.updateMatrixWorld(true); }
     this.drawn.localToWorld(this.tip.set(0, -1.12, 0));
 
     this.cloth.update(dt, st.p, st.yaw, g.scale.x, cam);

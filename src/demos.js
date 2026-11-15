@@ -4,6 +4,21 @@ import { DUEL_CLEARING, height, START } from './world.js';
 const place = (player, x, z, y) => { player.p[0] = x; player.p[2] = z; player.p[1] = y ?? height(x, z); player.v.fill(0); };
 const once = (player, key, fn) => { if (!player['_' + key]) { player['_' + key] = true; fn(); } };
 
+// The moves demo, as [what, for how long (s)]. `-` is a pause. tools/strip.sh finds a move's time from this list.
+export const MOVE_SEQ = [
+  ['-', .3], ['run', 1.1], ['-', .5], ['circle', 2.5], ['-', .2], ['walk', 2.0], ['face', .4],
+  ['jump', .1], ['-', .8], ['jump', .5], ['-', .6], ['run', .2], ['runjump', .5], ['run', .3], ['-', .4],
+  ['home', 1.6], ['face', .3], ['guard', .4], ['guardback', .6], ['block', .5], ['parry', .6], ['-', .3],
+  ['home', 1.2], ['face', .3], ['hop', .1], ['-', .7], ['roll', .1], ['-', .8],
+  ['home', 1.4], ['face', .3], ['roll', .1], ['-', .2], ['cut', .1], ['-', .7],
+  ['home', 1.4], ['face', .3], ['cut', .1], ['-', .25], ['cut', .1], ['-', .2], ['cut', .1], ['-', .9],
+  ['home', 1.0], ['face', .3], ['hitfront', .7], ['hitside', .7], ['hitheavy', .9],
+  ['home', 1.0], ['face', .3], ['thrown', 2.4],
+  ['home', 1.0], ['face', .3], ['thrown', .35], ['jump', .1], ['-', .9],
+  ['home', 1.0], ['face', .3], ['jump', .45], ['stab', .1], ['-', 1.2],
+  ['home', 1.0], ['face', .3], ['death', 3.6],
+];
+
 export const DEMOS = {
   // a sword stroke through standing fog, seen from above the shoulder
   slash(t, player, cam, inp) {
@@ -155,6 +170,36 @@ export const DEMOS = {
     once(player, 's', () => { place(player, .8, 8); player.setForm(0); player.burst = 0; cam.yaw = Math.PI; player.foe.n = player.foe.total; player.foe.spawn(); });
     inp.x = inp.z = inp.up = 0; inp.act = inp.dodge = inp.guard = false;
     cam.yaw = Math.PI + 1.6 * Math.sin(t * 2.4) * Math.min(1, t / 1.5); cam.pitch = -.3 + .25 * Math.sin(t * 1.7);
+  },
+  // Every move of the swordsman in turn (MOVE_SEQ), in the first clearing with the shadows sent away. For looking at
+  // motion: add --set='{"clear":true}' to see it without fog. Blows are dealt by hand here, without cost to health.
+  moves(t, player, cam, inp) {
+    const [cx, cz] = DUEL_CLEARING.center, p = player.p, mark = [cx + .3, cz];
+    once(player, 's', () => { place(player, cx - 3, cz); player.setForm(0); player.burst = 0; player.yaw = Math.PI / 2; player.foe.n = player.foe.total; player.foe.spawn(); player.home = [...mark]; });
+    const go = (x, z, k = 1) => { const l = Math.hypot(x, z) || 1; inp.x = -x / l * k; inp.z = z / l * k; };   // the camera's yaw is 0: forward is +z, the x key axis points to -x
+    const to = (pt, k) => { const d = Math.hypot(pt[0] - p[0], pt[1] - p[2]); if (d > .25) go(pt[0] - p[0], pt[1] - p[2], Math.min(k, d * .8 + .2)); };
+    const front = d => [p[0] + Math.sin(player.yaw) * d, p[1], p[2] + Math.cos(player.yaw) * d], side = () => [p[0] + Math.cos(player.yaw) * 2, p[1], p[2] - Math.sin(player.yaw) * 2];
+    const back = k => { player.v[0] -= Math.sin(player.yaw) * k; player.v[2] -= Math.cos(player.yaw) * k; };
+    const each = {
+      run: () => go(1, 0), circle: () => { const a = Math.atan2(p[2] - cz, p[0] - cx) + 1.9; go(Math.cos(a), Math.sin(a)); }, walk: () => to(mark, .42),
+      home: () => to(mark, 1), face: () => go(1, 0, .12), jump: () => { inp.up = 1; }, runjump: () => { go(1, 0); inp.up = 1; },
+      guard: () => { inp.guard = true; }, guardback: () => { inp.guard = true; go(-1, 0); }, block: () => { inp.guard = true; }, parry: () => { inp.guard = true; },
+      hop: () => { inp.dodge = true; }, roll: () => { inp.dodge = true; go(1, 0); }, cut: () => { inp.act = true; }, stab: () => { inp.up = 1; inp.act = true; },
+    };
+    const first = {
+      block: () => { player.blockT = .25; back(4); }, parry: () => { player.parryT = .32; },
+      hitfront: () => player.hurt(1, front(2), 0, 2.5), hitside: () => player.hurt(1, side(), 0, 2.5), hitheavy: () => player.hurt(2, front(2), 0, 4),
+      thrown: () => player.hurt(3, front(2), 0, 5), death: () => player.hurt(1, front(2), 99, 2),
+    };
+    inp.x = inp.z = inp.up = 0; inp.act = inp.dodge = inp.guard = false; cam.yaw = 0;
+    const lift = Math.max(0, p[1] - height(p[0], p[2])) * .7;
+    cam.fixed = { pos: [p[0], height(cx, cz) + 1.25 + lift, p[2] + 4.3], look: [p[0], height(cx, cz) + 1.0 + lift, p[2]] };   // from the side, close, moving with the figure
+    let clock = 0;
+    for (let i = 0; i < MOVE_SEQ.length; i++) {
+      const [name, d] = MOVE_SEQ[i];
+      if (t < clock + d) { each[name]?.(); if (first[name]) once(player, 'm' + i, first[name]); player.demoStep = name; break; }
+      clock += d;
+    }
   },
   // defence only: stand and answer each raised sword, guarding early, guarding late (a parry), or dodging aside
   ward(t, player, cam, inp) {

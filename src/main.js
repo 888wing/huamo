@@ -148,19 +148,33 @@ async function boot() {
 
   const demo = DEMOS[q.get('demo')] ?? null, override = { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false };
   const DT = sim.par.dt;
-  let hold = 0, clock = 0, flash = 0, kick = 0, gcam = 0, heroClearUntil = 0;
+  let hold = 0, clock = 0, flash = 0, kick = 0, gcam = 0, heroClearUntil = 0, slowT = 0, wasFallen = false;
   const tgt = new THREE.Vector3(), eye = new THREE.Vector3(), want = new THREE.Vector3();
   const soles = [new THREE.Vector3(), new THREE.Vector3()];
   let camReady = false;
 
   function tick() {
     // a blow that lands stops time for a few frames: that pause is where the weight is felt
-    const dt = hold > 0 ? (hold--, DT * .05) : DT; sim.par.dt = dt; clock += dt;
+    const dt = hold > 0 ? (hold--, DT * .05) : slowT > 0 ? (slowT -= DT, DT * .35) : DT; sim.par.dt = dt; clock += dt;
     const t = clock;
     if (demo) demo(t, player, cam, override);
     const beforeX = player.p[0], beforeZ = player.p[2];
     player.update(dt, demo ? override : input(), cam, enemy.alive ? enemy.p : giant.aim(player.p));
     pushOut(player.p, .32, giant.solids()); // its feet, and a hand lying on the ground, are in the way
+    // what the body did this step that the air should feel: leaving the ground, coming down, the stab from the air, landing on its back
+    for (const ev of player.events.splice(0)) {
+      const k = Math.min(1, (ev.v ?? 0) / 14);
+      if (ev.kind === 'jump') fx.push({ a: ev.at, r: 1.3, ink: 0, div: 9, life: .16, t: 0 });
+      else if (ev.kind === 'land') { fx.push({ a: ev.at, r: 1.2 + 1.2 * k, ink: 0, div: 8 + 16 * k, life: .2, t: 0 }); shake = Math.max(shake, .3 * k); }
+      else if (ev.kind === 'down') { fx.push({ a: ev.at, r: 1.8, ink: 0, div: 14, life: .2, t: 0 }); shake = Math.max(shake, .5); }
+      else if (ev.kind === 'plunge') {
+        fx.push({ a: ev.at, r: 2.6, ink: 0, div: 34, life: .25, t: 0 }); blasts.push({ p: [ev.at[0], ev.at[1] + .6, ev.at[2]], r: 5, split: 220, den: -22, life: .5, t: 0 });
+        splash.burst(ev.at, [0, 0], 30, .8); shake = Math.max(shake, 1.1); kick = Math.max(kick, .5); hold = Math.max(hold, 5);
+      }
+    }
+    // the last blow: the world slows for a moment as the swordsman goes down
+    if (player.fallen > 0 && !wasFallen) slowT = .45;
+    wasFallen = player.fallen > 0;
     const enemyWasFalling = enemy.mode === 'fall' && enemy.fallT < 1;
     enemy.update(dt, player.p);
     if (enemyWasFalling && enemy.fallT === 1) {
@@ -211,13 +225,13 @@ async function boot() {
 
     // ---- bodies: skeletons posed in code on top of the simulation-driven position
     const f = player.form, sp = Math.hypot(player.v[0], player.v[2]), run = Math.min(1, sp / [5.5, 12, 11, 7.5][f]);
-    const act = player.actT, down = player.fallen > 0 ? Math.min(1, (1.8 - player.fallen) / .5) : 0, fade = Math.max(.6 * player.burstT ** 2, down);
+    const act = player.actT, fade = .6 * player.burstT ** 2;
     hero.visible = f === 0; shade.visible = enemy.present;
     beasts.forEach((b, i) => { b.visible = i === f - 1; });
-    const pose = { p: player.p, yaw: player.yaw, phase: player.phase, run, act, combo: player.combo, side: player.side, windup: 0, stagger: player.stagger / .45, fade, guard: player.guard, vy: player.v[1], time: t };
+    const pose = player.pose(t, fade);
     if (f === 0) hero.update(dt, pose, camera.position); else beasts[f - 1].update(dt, pose, camera.position);
     oni.update(dt, giant, camera.position);
-    if (shade.group.visible) shade.update(dt, { p: enemy.p, yaw: enemy.yaw, phase: enemy.phase, run: Math.min(1, Math.hypot(enemy.v[0], enemy.v[2]) / 3.6), act: enemy.actT, side: enemy.side, windup: enemy.windup, stagger: enemy.stagger / .5, fade: enemy.fade, fall: enemy.fallT, melt: enemy.meltT, eyes: enemy.mode !== 'fall', time: t }, camera.position);
+    if (shade.group.visible) shade.update(dt, { p: enemy.p, v: enemy.v, yaw: enemy.yaw, phase: enemy.phase, run: Math.min(1, Math.hypot(enemy.v[0], enemy.v[2]) / 3.6), act: enemy.actT, side: enemy.side, windup: enemy.windup, stagger: enemy.stagger / .5, fade: enemy.fade, fall: enemy.fallT, melt: enemy.meltT, eyes: enemy.mode !== 'fall', time: t }, camera.position);
     const bl = player.blade();
     const bladePhase = bl?.trailPhase ?? act;
     trail.update(dt, bl, bladePhase, hero.tip);
@@ -344,9 +358,9 @@ async function boot() {
       const tot = ms ? Object.values(ms).reduce((a, b) => a + b, 0) : 0;
       const pips = (n, of) => '●'.repeat(Math.max(0, n)) + '○'.repeat(of - Math.max(0, n));
       const move = f === 0 && act >= 0 ? `  ${['橫斬', '挑斬', '下劈'][player.combo ?? 0]}` : '';
-      let s = `${FORMS[f]}${move}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? enemy.hp : 0, 3)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? '  巨相撲鬼' : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
+      let s = `${FORMS[f]}${move}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? Math.ceil(enemy.hp) : 0, enemy.maxHp ?? 6)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? '  巨相撲鬼' : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
       if (drawer) {
-        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n1 人 2 虎 3 鶴 4 鯉 · 左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（鶴鯉為下降）\n巨相撲鬼：四股的震波要跳過或閃過 · 巨掌落下前走開 · 手掌貼地時可以斬\nV 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
+        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n1 人 2 虎 3 鶴 4 鯉 · 左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（不按方向＝後跳，按方向＝翻滾；鶴鯉為下降）\n空中按出招＝下突刺 · 閃避尾段按出招＝衝斬 · 被擊飛時按空白＝受身\n巨相撲鬼：四股的震波要跳過或閃過 · 巨掌落下前走開 · 手掌貼地時可以斬\nV 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
         if (ms) s += '\n\n' + Object.entries(ms).map(([k, v]) => `${k.padEnd(18)}${v.toFixed(2)} ms`).join('\n');
         if (probeText) s += '\n\n' + probeText;
       }
@@ -361,6 +375,8 @@ async function boot() {
   window.__bench = async k => { const t0 = performance.now(); for (let i = 0; i < k; i++) { tick(); await device.queue.onSubmittedWorkDone(); } return (performance.now() - t0) / k; };
   window.__state = () => ({ frame, ms, clock, hold, p: player.p, form: player.form, hp: player.hp, combo: player.combo,
     attack: player.actT, dealt, taken, warded, foe: enemy.mode, enemyHp: enemy.hp, enemyIndex: enemy.n, fall: enemy.fallT, melt: enemy.meltT,
+    step: player.demoStep, vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
+    hero: { ik: hero.ikW, feet: hero.feet.map(f => { const b = hero.B['foot' + f.k].getWorldPosition(tv); return { planted: f.t >= 1, x: b.x, y: b.y, z: b.z }; }) },
     boss: giant.mode, parts: giant.parts, target: giant.target, planted: giant.planted && giant.fall >= 1 && giant.ik >= 1, side: giant.side,
     foot: giant.parts ? ['footL', 'footR'].map(k => giant.parts[k][1] - height(giant.parts[k][0], giant.parts[k][2])) : null });
   window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
