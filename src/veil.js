@@ -13,7 +13,7 @@ export class Veil {
       const ps = await Promise.all(names.map(n => gpu.pipeline(m, n)));
       pipes = Object.fromEntries(names.map((n, k) => [n, ps[k]]));
     }
-    const v = Object.assign(new Veil(), { heal: .5, top: 3.6, turb: 26, lift: 3 }, opt);
+    const v = Object.assign(new Veil(), { heal: .5, top: 4.4, turb: 36, lift: 3 }, opt);
     v.gpu = gpu; v.seed = i * 7.3;
     const mk = () => gpu.tex([VW, VH], 'rgba16float');
     v.A = mk(); v.B = mk(); v.D = mk(); v.P0 = mk(); v.P1 = mk();

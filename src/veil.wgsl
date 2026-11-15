@@ -36,7 +36,7 @@ fn at(t: texture_2d<f32>, p: vec2i) -> vec4f { return textureLoad(t, clamp(p, ve
   v += P_.g.x * d * dt * vec2f(cos(q.y * 2.3 + t * .7) + .6 * cos(q.y * 4.7 - t * 1.1 + q.x), -cos(q.x * 2.1 - t * .6) - .6 * cos(q.x * 4.3 + t * .9 + q.y));
   v.y -= P_.g.y * d * dt;
   for (var i = 0; i < i32(P_.g.z); i++) {
-    let e = P_.s[i]; let o = pos - e.p.xy; let k = exp(-dot(o, o) / (e.p.z * e.p.z)) * e.p.w;
+    let e = P_.s[i]; let o = pos - e.p.xy; let k = max(0., 1. - length(o) / e.p.z) * e.p.w; // strongest at the centre, fading in a straight line to nothing at the edge
     v = mix(v, e.v.xy, clamp(k * e.v.w * dt, 0., 1.));
     d = max(0., d + e.v.z * k * dt);
   }
