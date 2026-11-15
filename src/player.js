@@ -182,9 +182,15 @@ export class Player {
     this.morphT = Math.max(0, this.morphT - dt);
     const guardPressed = !!inp.guard && !this.guardWas; this.guardWas = !!inp.guard; this.guardTap += dt;
     if (f !== 0 && !this.free) {
+      const { p, v } = this;
       this.ink -= dt / SHIFT_TIME;
       if (this.ink <= 0) { this.ink = 0; this.revert(false, foe); return this.update(0, inp, cam, foe); }
       if (pressed && this.morphT <= 0) { this.revert(true, foe); return this.update(0, { ...inp, act: true }, cam, foe); }
+      // off the ground as tiger or carp, jump pressed again is still the crane: one beast hands on to the next without touching down
+      const aloft = f === 1 ? !this.ground && this.airT > .08 : f === 3 && p[1] > FOG_TOP + .15;
+      if (jumpPressed && aloft && this.shift(2)) return this.update(0, inp, cam, foe);
+      // the carp at the surface leaps clear of the fog and falls back in an arc
+      if (f === 3 && jumpPressed && p[1] > FOG_TOP - .5 && p[1] <= FOG_TOP - .29) { v[1] = 9.5; p[1] = FOG_TOP - .29; this.events.push({ kind: 'breach', at: [...p] }); }
     } else if (f === 0) this.ink = Math.min(1, this.ink + dt / REFILL);
     // thrown off the feet: nothing answers until it has landed, lain a moment and got up; a press of jump in the air lands it standing
     const helpless = this.ko > 0 || this.plunge === 2;

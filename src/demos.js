@@ -28,6 +28,13 @@ export const SHIFT_SEQ = [
   ['run', .4], ['jump', .12], ['run', .14], ['jump', .1], ['-', 1.4],                                                // too little ink yet: the second press does nothing
 ];
 
+// The beasts demo.
+export const BEAST_SEQ = [
+  ['tiger', .1], ['-', .4], ['run', 1.2], ['-', .5], ['back', 1.1], ['ring', 3.0], ['-', .5], ['act', .1], ['-', 1.2],
+  ['crane', .1], ['climb', 2.2], ['glide', 3.2], ['dive', .9], ['climb', 1.2], ['glide', 1.5],
+  ['carp', .1], ['swim', 2.6], ['rise', .9], ['-', .1], ['leap', .1], ['swim', 1.8], ['rise', .5], ['-', .1], ['leap', .1], ['swim', 1.6],
+];
+
 export const DEMOS = {
   // a sword stroke through standing fog, seen from above the shoulder
   slash(t, player, cam, inp) {
@@ -228,6 +235,24 @@ export const DEMOS = {
     cam.fixed = { pos: [cx + (p[0] - cx) * .3, height(cx, cz) + 1.6 + lift, cz + 8.6], look: [p[0], height(cx, cz) + 1.0 + lift, p[2]] };
     let clock = 0;
     for (const [name, d] of SHIFT_SEQ) { if (t < clock + d) { each[name]?.(); player.demoStep = name; break; } clock += d; }
+  },
+  // The three beasts in turn, set directly (no gauge): the tiger's gallop, turn and roar; the crane climbing, gliding
+  // round, diving; the carp swimming, turning and leaping out of the fog. For looking at the rigs: --set='{"clear":true}'.
+  beasts(t, player, cam, inp) {
+    const [cx, cz] = DUEL_CLEARING.center, p = player.p;
+    once(player, 's', () => { place(player, cx - 3, cz); player.burst = 0; player.yaw = Math.PI / 2; player.foe.n = player.foe.total; player.foe.spawn(); });
+    const go = (x, z, k = 1) => { const l = Math.hypot(x, z) || 1; inp.x = -x / l * k; inp.z = z / l * k; };
+    const round = (r, k = 1) => { const a = Math.atan2(p[2] - cz, p[0] - cx) + .7; go(cx + r * Math.cos(a) - p[0], cz + r * Math.sin(a) - p[2], k); };
+    const alt = p[1] - height(p[0], p[2]);
+    const each = {
+      tiger: () => player.setForm(1), crane: () => player.setForm(2), carp: () => player.setForm(3), run: () => go(1, 0), back: () => go(-1, 0), ring: () => round(3.2, .7), act: () => { inp.act = true; },
+      climb: () => { round(3.4); inp.up = alt < 3.4 ? 1 : 0; }, glide: () => round(3.6), dive: () => { round(3.6); inp.down = 1; }, swim: () => round(3), rise: () => { round(3); inp.up = 1; }, leap: () => { round(3); inp.up = 1; },
+    };
+    inp.x = inp.z = inp.up = inp.down = 0; inp.act = inp.dodge = inp.guard = false; cam.yaw = 0;
+    const lift = Math.max(0, alt - .5) * .7;
+    cam.fixed = { pos: [p[0], height(cx, cz) + 1.3 + lift, p[2] + 5.2], look: [p[0], height(cx, cz) + .9 + lift, p[2]] };
+    let clock = 0;
+    for (const [name, d] of BEAST_SEQ) { if (t < clock + d) { each[name]?.(); player.demoStep = name; break; } clock += d; }
   },
   // defence only: stand and answer each raised sword, guarding early, guarding late (a parry), or dodging aside
   ward(t, player, cam, inp) {
