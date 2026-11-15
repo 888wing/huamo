@@ -3,7 +3,7 @@ import src from './sim3d.wgsl';
 import mgSrc from './mg.wgsl';
 import { half } from './gpu.js';
 
-export const MAX_EM = 12;
+export const MAX_EM = 16;
 
 export class Sim3D {
   // cfg: { n:[nx,ny,nz], h, org:[x,y,z], f32, terrain: { tex, x0, z0, size } }

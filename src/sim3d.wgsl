@@ -16,7 +16,7 @@ struct Params {
   b: vec4f,   // fog top altitude, fog heal rate, ink fade rate, 1 = midpoint (RK2) back-trace
   c: vec4f,   // terrain map: world x0, z0, 1/size ; advection: 0 semi-Lagrangian, 1 MacCormack
   sh: vec4i,  // cells the box just moved by (for the shift passes)
-  em: array<Em, 12>,
+  em: array<Em, 16>,
 }
 
 @group(0) @binding(0) var<uniform> P_: Params;

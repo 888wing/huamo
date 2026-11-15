@@ -12,16 +12,19 @@ Open `dist/index.html` in desktop Chrome or Edge (WebGPU). No server needed.
 |---|---|
 | `W` `A` `S` `D` | move |
 | mouse (click the page first) | look |
-| `Space` / `Shift` | jump or climb / descend |
+| `Space` / `Shift` | jump or climb / dodge (descend as crane or carp) |
 | `1` `2` `3` `4` | 人 sword stroke · 虎 roar · 鶴 wing-beat · 鯉 swim |
 | left mouse or `F` | the form's action |
+| right mouse or `Q` | guard (raised just in time: a parry) |
 | `V` | top-down slice of the simulation |
 | `T` | GPU time per simulation stage |
 | `P` | validation numbers (slow) |
 | `R` | reset the fog |
 | `Tab` | help and details |
 
-URL options: `?f32=1` (32-bit float fields), `?n=96,40,96&h=0.25` (box cells and cell size), `?cycles=2` (pressure accuracy), `?dpr=2` (pixel ratio cap, default 1.5), `?demo=spar|tour|slash|roar|flap|carp`.
+URL options: `?f32=1` (32-bit float fields), `?n=96,40,96&h=0.25` (box cells and cell size), `?cycles=2` (pressure accuracy), `?dpr=2` (pixel ratio cap, default 1.5), `?demo=spar|boss|oni|tour|slash|roar|flap|carp`, `?boss` (skip the four shadows and start near the giant).
+
+The slice: walk the path north through the reeds, cut down four ink shadows one after another, and at the path's end the giant (巨相撲鬼) rises. Its stamp sends a ring through the fog: jump it or dodge through it. Its open hand comes down where you stood: move, then cut the hand while it lies there. It cannot be defeated yet.
 
 ## Build
 

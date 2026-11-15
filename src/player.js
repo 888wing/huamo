@@ -1,6 +1,6 @@
 // The fighters. The player is one body with four forms; each form moves differently and pushes on the fog differently.
 // The enemy is an ink shadow of the swordsman that closes in, shows its strike before it comes, and can be cut down.
-import { height, SIZE, FOG_TOP, pathPoint, pushOut } from './world.js';
+import { height, SIZE, FOG_TOP, pathPoint, pushOut, START } from './world.js';
 
 export const FORMS = ['人 斬', '虎 吼', '鶴 翼', '鯉 游'];
 const SPEED = [5.5, 12, 11, 7.5], ACT = [0.36, 0.35, 0.7, 0.5], COOL = [0.62, 1.4, 0.9, 1.2];
@@ -31,10 +31,10 @@ function walk(p, v, dt, step) {
 
 export class Player {
   constructor() {
-    this.p = [1.5, 0, 19]; this.p[1] = height(1.5, 19);
+    this.p = [START[0], height(...START), START[1]];
     this.v = [0, 0, 0]; this.yaw = Math.PI; this.form = 0;
     this.act = 0; this.cool = 0; this.side = 1; this.ground = true; this.phase = 0; this.burst = 0; this.shake = 0; this.t = 0; this.stagger = 0; this.hit = false;
-    this.hp = HP; this.dodge = 0; this.dodgeCool = 0; this.guard = false; this.guardT = 0; this.fallen = 0; this.dv = [0, 0];
+    this.hp = HP; this.dodge = 0; this.dodgeCool = 0; this.guard = false; this.guardT = 0; this.fallen = 0; this.dv = [0, 0]; this.home = [...START];
   }
   setForm(f) { if (f !== this.form) { this.form = f; this.act = 0; this.burst = BURST; this.shake = .25; } } // momentum carries over
   get actT() { return this.act > 0 ? 1 - this.act / ACT[this.form] : -1; }
@@ -45,7 +45,7 @@ export class Player {
     const { p, v } = this, f = this.form;
     if (this.fallen > 0) { // cut down: scattered as ink, then back at the start
       this.fallen -= dt; v[0] = v[2] = 0;
-      if (this.fallen <= 0) { p[0] = 1.5; p[2] = 19; p[1] = height(1.5, 19); this.hp = HP; this.burst = BURST; this.stagger = 0; }
+      if (this.fallen <= 0) { p[0] = this.home[0]; p[2] = this.home[1]; p[1] = height(p[0], p[2]); this.hp = HP; this.burst = BURST; this.stagger = 0; }
       return;
     }
     const F = [Math.sin(cam.yaw), 0, Math.cos(cam.yaw)], R = [-F[2], 0, F[0]];
@@ -127,7 +127,7 @@ export class Player {
   }
 }
 
-const STATIONS = [.2, .4, .6, .8].map(pathPoint); // one enemy at a time, each waiting further along the path
+const STATIONS = [.22, .38, .54, .7].map(pathPoint); // one enemy at a time, each waiting further along the path
 const WIND = 0.55, STRIKE = 0.34;
 
 export class Enemy {

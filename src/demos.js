@@ -1,5 +1,5 @@
 // Scripted runs for repeatable captures: each sets the player's form and input over time and may pin the camera.
-import { height } from './world.js';
+import { height, START } from './world.js';
 
 const place = (player, x, z, y) => { player.p[0] = x; player.p[2] = z; player.p[1] = y ?? height(x, z); player.v.fill(0); };
 const once = (player, key, fn) => { if (!player['_' + key]) { player['_' + key] = true; fn(); } };
@@ -43,7 +43,7 @@ export const DEMOS = {
   },
   // sparring: walk up to the ink shadow and trade strokes with it
   spar(t, player, cam, inp) {
-    once(player, 's', () => { place(player, 1.5, 19); player.setForm(0); player.burst = 0; });
+    once(player, 's', () => { place(player, ...START); player.setForm(0); player.burst = 0; });
     const e = player.foe.p, dx = e[0] - player.p[0], dz = e[2] - player.p[2], d = Math.hypot(dx, dz);
     let a = Math.atan2(dx, dz) + .5 - cam.yaw; a = Math.atan2(Math.sin(a), Math.cos(a));
     cam.yaw += a * Math.min(1, 2.5 / 60); cam.pitch = -.2;
@@ -51,6 +51,35 @@ export const DEMOS = {
     const tell = player.foe.windup, turn = Math.floor(t / 3.2) % 3; // answer each raised sword a different way
     inp.guard = tell > .62 && turn === 0; inp.dodge = tell > .85 && turn === 1; if (inp.dodge) inp.x = 1;
     inp.act = d < 3.9 && player.foe.alive && !inp.guard && (t * 1.25) % 1 < .15;
+  },
+  // the giant, seen plainly: pass ?boss, and switch the fog off with --set='{"clear":true}'. The camera walks round it
+  oni(t, player, cam, inp) {
+    once(player, 's', () => { place(player, .3, -14.5); player.setForm(0); player.burst = 0; player.yaw = Math.PI; });
+    const g = player.boss, a = t < 4 ? 0 : t < 8 ? -.78 : t < 12 ? -1.57 : -1.57 - (t - 12) * .5, c = g.p;
+    if (t < 16) g.think = 9; // it stands and breathes while we look
+    cam.fixed = { pos: [c[0] + Math.sin(a) * 16, c[1] + 5.4, c[2] + Math.cos(a) * 16], look: [c[0], c[1] + 5.4, c[2]] };
+  },
+  // the bout: walk in, wake it, keep moving, jump the rings, step out from under the hand and cut it while it lies there
+  boss(t, player, cam, inp) {
+    once(player, 's', () => { place(player, 3.6, -3.8); player.setForm(0); player.burst = 0; player.yaw = Math.PI; cam.yaw = Math.PI - .16; });
+    const g = player.boss, dx = g.p[0] - player.p[0], dz = g.p[2] - player.p[2], d = Math.hypot(dx, dz);
+    let a = Math.atan2(dx, dz) + (g.awake ? .5 : 0) - cam.yaw; a = Math.atan2(Math.sin(a), Math.cos(a)); cam.yaw += a * Math.min(1, 2.5 / 60); cam.pitch = -.3;
+    inp.x = 0; inp.z = 0; inp.up = 0; inp.dodge = false; inp.act = false;
+    if (g.mode === 'sleep' || g.mode === 'rise') inp.z = d > 9.5 ? 1 : 0;
+    else if (g.planted) { // the hand is down: run to it and cut
+      const h = g.parts[g.side > 0 ? 'handL' : 'handR'], hx = h[0] - player.p[0], hz = h[2] - player.p[2], hd = Math.hypot(hx, hz), F = [Math.sin(cam.yaw), Math.cos(cam.yaw)];
+      inp.z = hd > 3 ? (hx * F[0] + hz * F[1]) / hd : 0; inp.x = hd > 3 ? (hx * -F[1] + hz * F[0]) / hd : 0; inp.act = hd < 3.9 && (t * 1.6) % 1 < .2;
+    } else {
+      inp.z = d > 6 ? 1 : d < 4.6 ? -1 : 0;
+      if (g.mode === 'slam' && g.wind > .55 && g.fall < 1) { inp.x = g.side; inp.dodge = g.wind > .95 && g.fall < .1; }   // out from under the hand
+      if (g.ring) { const rd = Math.hypot(player.p[0] - g.ring.at[0], player.p[2] - g.ring.at[2]); inp.up = rd - g.ring.r < 3.2 && rd > g.ring.r ? 1 : 0; } // over the ring
+    }
+  },
+  // the same bout with a player who only walks up and stands there: checks that the ring and the palm hurt, and the fall and the return
+  stand(t, player, cam, inp) {
+    once(player, 's', () => { place(player, .2, -15); player.setForm(0); player.burst = 0; player.yaw = Math.PI; });
+    const g = player.boss; cam.yaw = Math.atan2(g.p[0] - player.p[0], g.p[2] - player.p[2]); cam.pitch = -.3;
+    inp.x = inp.up = 0; inp.z = Math.hypot(g.p[0] - player.p[0], g.p[2] - player.p[2]) > 5.5 ? 1 : 0; inp.act = inp.dodge = inp.guard = false;
   },
   // defence only: stand and answer each raised sword, guarding early, guarding late (a parry), or dodging aside
   ward(t, player, cam, inp) {

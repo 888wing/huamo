@@ -276,6 +276,70 @@ below waist height that move when the figure moves; the grass looked sparse.
 Whole frame on the M4: 8.7 ms at 720p, 12.4 ms at 1080p. Scripted run: all four enemies met in order and defeated.
 Seen in two stills: a dense reed field with the path through it. Reeds leaning from movement was not checked in motion.
 
+## Round 20 (2026-11-15): step 4 — the giant; gold reeds; pines redrawn
+
+Owner: sent the design sheet for the boss, 巨相撲鬼 (a giant sumo demon: topknot, twisted rope belt hung with folded
+paper, ragged skirt, bare feet, about six swordsmen tall). The reeds' white triangle plumes were too loud: keep only
+the grass and make it yellow. The background trees' foliage shapes were ugly. Density and mood were right.
+
+- Reeds (`stage.js`): plumes removed, eleven blades per tuft, ochre at the root to straw gold at the tip. The depth
+  line pass (`fog.js`) now draws its line as a darker stroke of the pixel's own colour on anything saturated, so the
+  field is not inked grey. New uniforms: `press` (three heavy things with a radius: the giant's feet and a hand) and
+  `ring` (a shock running outwards: the whole field bows as it passes).
+- Pines (`stage.js`): the stacked discs are gone. A pine is now a crooked trunk (a tube along a wandering spine),
+  4-6 branches on alternate sides, and along each branch a row of needle tufts. A tuft is three crossed upright
+  cards; the material cuts each into a fan of needles (two rings, constant needle width, each needle its own length;
+  far away the needles fatten and close up; within 3.4 m of the lens they drop out one by one). All wood is one
+  mesh and all needles another: two draw calls for every tree and bush, where there were about 450. Bushes are the
+  same tufts bunched on the ground. `buildBodies` (unused since round 4) was removed.
+- World (`world.js`): `START` (the player now begins at (0.4, 22.5)), `ARENA` and `arenaDist()` (a clearing with no
+  pines or bushes round the giant), the sixth pillar moved from (2, -14) to (9.5, -16) so it stands at the clearing's
+  edge, `pushOut(p, pad, list)` takes any list of circles. Enemy stations are now at 22/38/54/70 % of the path.
+- The giant, logic (`src/boss.js`, no three.js): `Giant` waits in a wrestler's crouch at `ARENA.home`, wakes when the
+  fourth shadow is done and the player is within 12.5 m, rises (2.4 s), bellows, stamps once, then fights:
+  `stomp` (leg up 0.85 s, held 0.32 s, down in 0.13 s; a ring runs out at 14 m/s and takes 1 health from anyone
+  standing on the ground when it passes, out to 11.5 m: jump it, dodge through it, or be in the air),
+  `slam` (arm raised 1.05 s, aimed until 72 % of that, strike 0.2 s; 2 health within 2.7 m of the palm; the hand then
+  lies on the ground for 1.7 s), `step` (one pace, never more than 2.4 m from home). A sword stroke on the lying hand
+  makes it flinch; on an ankle it only throws ink. **The giant cannot be killed yet: that is step 5.**
+  `emitters()` / `stir()` feed the 3D fog and the smoke layers from where its hands and feet really are;
+  `solids()` are the circles the player cannot walk through. `stir()` also thins the smoke in front of its chest and
+  head through every layer between it and the eye (a density sink with `reach`), so the raised arm or leg that
+  announces a blow can be read through the fog; its legs stay sunk in it.
+- The giant, body (`src/giant.js`): `GiantRig`, 15 bones, one unit = its full height, scaled to `GH` = 10.5 m.
+  Torso as overlapping ellipsoids, limbs as turned shapes (`limb()`), fingers that curl as one, toes, face with a
+  scowl and vermilion eyes that light when it wakes, rope (torus with a twisted-strand pattern), five paper
+  streamers on spring pendulums, 50 verlet strips (skirt in two layers, hair, rope tails). Every mass also has a
+  back-face ink shell whose width wanders: that is the heavy brush outline. Legs are posed against the ground,
+  not the pelvis; soles are set flat from the shin's world rotation; the body is dropped so its lower foot stands on
+  the terrain; arms reach with a two-bone solver (`reach()`: crouch fists, the slamming palm).
+- `main.js`: giant events become shake, flash, lens punch, hit-stop, ink, a divergence burst in the 3D fog and a
+  `blast` in the smoke layers (a point splat that pushes outwards and thins); camera drops back 70 % and looks up
+  while the giant is awake; a fall after waking it brings the player back at (-1, -6), and after each shadow at the
+  spot it fell. Emitter limit 12 -> 16; emitters outside the simulated box are not sent. `?boss` skips the four
+  shadows. `?hide=needles,wood,reeds,giant` hides parts for measuring. `__set({clear:true})` switches fog and smoke
+  off to look at models. Demos: `boss` (a scripted bout), `stand` (a player who does not defend), `oni` (a walk
+  round the giant).
+- `tools/check-boss.mjs [seconds]`: runs the bout and prints the mode sequence, how far the planted hand lands from
+  its aim, how low the soles sit, the tally and any errors.
+
+Measured, scripted, 60 s bout: 8 slams and 5 stamps, no errors; the planted hand is at most 0.9 m from its aim at the
+instant of impact and on it 0.3 s later (the palm centre rides 0.4 m above the ground point); the lower sole is within
+2 cm of the ground throughout. That player dodged everything; a second scripted player who only walks up and stands
+there (`?demo=stand`) was hit 10 times in 50 s, fell and came back, with no errors. Whole frame on the M4 with another session using the GPU at the same
+time: 9.3 ms at 720p, 13.5 ms at 1080p (round 19: 8.7 and 12.4). With needles, giant and its emitters hidden: 8.9 and
+12.6 ms.
+
+Bugs found on the way, worth remembering:
+- A child bone's rotation is relative to its parent: pitching the pelvis forward 56 deg carried the thighs with it,
+  so a "deep squat" stood nearly upright. Legs are now posed in ground terms (`thigh.x - hipX`).
+- The wind-up lean stayed on through the strike, so the body never bowed far enough for the hand to reach.
+- Ground height in the arena is about 0.9 m, not 0: reach estimates made from the origin were all short.
+
+**Another session (Codex) was changing the smoke system in the same working tree during this round** (procedural
+smoke atlas, blade cut strips, `fogDensity`). Its edits were left uncommitted and untouched; this round's commit and
+the deployed page were built in a separate worktree from this round's changes only.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).
@@ -385,7 +449,8 @@ Phenomena, checked in slice views (`out/validate.png`, `out/v_carp2.png`):
   suspect.
 - Solver A: no vortex street behind the carp at 0.25 m cells.
 - The simulation takes one fixed 1/60 s step per rendered frame, so it slows down if the frame rate drops.
-- No combat, no ink resource, no enemies. The bodies are still primitives.
+- The giant cannot be defeated yet (step 5: climbing it and the final stab). Its feet slide a little when the pose
+  changes; skirt strips pass through a raised leg; nothing collides with bushes.
 - Not tested: Safari, Firefox, Windows, any phone, a real interactive play session (all checks were scripted runs in
   headless Chrome).
 

@@ -18,7 +18,7 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     projInv: uniform(camera.projectionMatrixInverse), camWorld: uniform(camera.matrixWorld), camPos: uniform(new THREE.Vector3()),
     near: uniform(camera.near), far: uniform(camera.far), dpr: uniform(1),
     boxMin: uniform(new THREE.Vector3()), boxSize: uniform(new THREE.Vector3(1, 1, 1)),
-    flash: uniform(0), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
+    flash: uniform(0), smoke: uniform(1), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
     slice: uniform(0.3), sliceV: uniform(0), top: uniform(10), reach: uniform(90), fogTop: uniform(FOG_TOP),
     paper: uniform(new THREE.Color(PAPER)), ink: uniform(new THREE.Color(INK)),
     air: uniform(new THREE.Color(PAPER).lerp(new THREE.Color(INK), .26)), // the air is a grey wash, so white fog is the lightest thing in the picture
@@ -140,7 +140,9 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     const lap = zAt(uv.add(vec2(r.x, 0))).add(zAt(uv.sub(vec2(r.x, 0)))).add(zAt(uv.add(vec2(0, r.y)))).add(zAt(uv.sub(vec2(0, r.y)))).sub(z.mul(4));
     const dry = texture3D(noise, vec3(uv.mul(vec2(31, 19)), .11)).level(0).b;
     const line = smoothstep(.01, .045, abs(lap).div(z)).mul(smoothstep(.2, .55, dry.add(wob.mul(.5)))).mul(exp(z.mul(-.018)).mul(.85).add(.15));
-    col.assign(mix(col, u.ink, line.mul(.9)));
+    // on anything coloured (the dry grass) the line is a darker stroke of that colour, not black: the field stays gold
+    const mx = max(col.r, max(col.g, col.b)), sat = clamp(mx.sub(min(col.r, min(col.g, col.b))).div(max(mx, .001)).mul(1.6), 0, 1);
+    col.assign(mix(col, mix(u.ink, col.mul(.45), sat), line.mul(mix(.9, .35, sat))));
 
     // far things wash out towards paper: distance is ink tone
     col.assign(mix(u.air, col, sky.select(0, exp(z.mul(u.haze).negate()))));
@@ -164,7 +166,7 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
 
     // the smoke layers, far to near: each is laid over whatever lies beyond its distance, so smoke passes both behind
     // and in front of things. A second tap towards the light shades each layer: thick smoke up-light puts this texel in shadow.
-    const sm = smokeRT.sample(uv); col.assign(col.mul(sm.a).add(sm.rgb));
+    const sm = mix(vec4(0, 0, 0, 1), smokeRT.sample(uv), u.smoke); col.assign(col.mul(sm.a).add(sm.rgb));
 
     // the sword stroke goes on last, over the fog
     col.assign(mix(col, u.ink, strokeT.r.mul(.94).mul(keep.mul(1.25).oneMinus())));

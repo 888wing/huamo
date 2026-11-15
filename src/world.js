@@ -14,7 +14,7 @@ function noise(x, y) {
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 // x, z, radius, height
-export const PILLARS = [[-9, -6, 1.6, 9], [-4, 9, 1.2, 7], [7, 4, 2.0, 11], [12, -10, 1.4, 8], [-15, 4, 1.1, 6.5], [2, -14, 1.7, 9.5]];
+export const PILLARS = [[-9, -6, 1.6, 9], [-4, 9, 1.2, 7], [7, 4, 2.0, 11], [12, -10, 1.4, 8], [-15, 4, 1.1, 6.5], [9.5, -16, 1.7, 9.5]]; // the last one stands at the edge of the giant's clearing
 
 export function height(x, z) {
   const r = Math.hypot(x, z) / (SIZE / 2);
@@ -56,6 +56,7 @@ export function terrainTexture(gpu, n = 256) {
 
 // The path through the forest, south to north, as a line of points (x, z).
 export const PATH = [[0, 24], [3, 15], [-4, 6], [5, -2], [-2, -11], [1, -22]];
+export const START = [.4, 22.5]; // where the player begins, at the path's south end
 export function pathDist(x, z) {
   let best = 1e9;
   for (let i = 0; i < PATH.length - 1; i++) {
@@ -72,8 +73,14 @@ export function pathPoint(f) {
   let d = f * total;
   for (let i = 0; i < seg.length; i++) { if (d <= seg[i] || i === seg.length - 1) { const t = Math.min(1, d / seg[i]); return [PATH[i][0] + (PATH[i + 1][0] - PATH[i][0]) * t, PATH[i][1] + (PATH[i + 1][1] - PATH[i][1]) * t]; } d -= seg[i]; }
 }
+// The clearing at the path's end where the giant waits: it squats at `home` and never goes far from it.
+export const ARENA = { home: [.6, -20.5], gate: [-.6, -13] };
+export function arenaDist(x, z) {
+  const [ax, az] = ARENA.home, [bx, bz] = ARENA.gate, dx = bx - ax, dz = bz - az, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+  return Math.hypot(x - ax - dx * t, z - az - dz * t);
+}
 // tree trunks: [x, z, radius], filled in by the stage. pushOut keeps a body (or the camera) outside them.
 export const OBSTACLES = [];
-export function pushOut(p, pad) {
-  for (const [x, z, r] of OBSTACLES) { const dx = p[0] - x, dz = p[2] - z, d = Math.hypot(dx, dz), m = r + pad; if (d < m && d > 1e-4) { p[0] = x + dx / d * m; p[2] = z + dz / d * m; } }
+export function pushOut(p, pad, list = OBSTACLES) {
+  for (const [x, z, r] of list) { const dx = p[0] - x, dz = p[2] - z, d = Math.hypot(dx, dz), m = r + pad; if (d < m && d > 1e-4) { p[0] = x + dx / d * m; p[2] = z + dz / d * m; } }
 }

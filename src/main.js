@@ -8,6 +8,8 @@ import { buildBeasts } from './beasts.js';
 import { createFog } from './fog.js';
 import { Player, Enemy, spar, swing, FORMS, HP } from './player.js';
 import { Figure } from './figure.js';
+import { Giant } from './boss.js';
+import { GiantRig } from './giant.js';
 import { Veil, VW, VH } from './veil.js';
 import atlasUrl from '../assets/smoke_atlas.jpg';
 import { DEMOS } from './demos.js';
@@ -34,10 +36,15 @@ async function boot() {
   const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.2, 600);
   const noise = await noiseTexture(gpu);
   const stage = buildStage(scene, noise);
+  for (const k of (q.get('hide') ?? '').split(',')) if (stage.parts[k]) stage.parts[k].visible = false; // for measuring what each part costs
   const beasts = buildBeasts(scene, noise), trail = buildTrail(noise), trail2 = buildTrail(noise, trail.scene);
   const hero = new Figure(scene, noise, { robe: .76, cloak: .1, legs: .22, hat: .46, skin: .8, wraps: .74 });
   const shade = new Figure(scene, noise, { robe: .2, cloak: .02, legs: .06, hat: .1, skin: .3, wraps: .16 });
-  const enemy = new Enemy(), fx = [], splash = buildSplash(trail.scene);
+  const enemy = new Enemy(), fx = [], blasts = [], splash = buildSplash(trail.scene);
+  const giant = new Giant(), oni = new GiantRig(scene, noise);
+  if (q.get('hide')?.includes('giant')) { oni.group.visible = false; oni.cloth.mesh.visible = false; }
+  // only what reaches into the simulated box is worth sending to it
+  const inBox = e => { const b = e.b ?? e.a, m = e.r + 1; return [0, 2].every(i => Math.max(e.a[i], b[i]) > sim.org[i] - m && Math.min(e.a[i], b[i]) < sim.org[i] + n[i] * h + m); };
   let dealt = 0, taken = 0, warded = 0;
   // five layers of smoke between 2.6 and 18 m from the camera; the first two lie between the camera and the figure
   const veils = await Promise.all([[1.3, 2.2, 1, .55, 80, 7], [2.0, 2.6, 1, .68, 75, 7], [2.7, 3.0, 1, .8, 70, 6.5], [3.4, 3.2, 1, .9, 65, 6], [4.2, 3.4, 1, 1.0, 60, 5.5], [5.2, 3.6, 1, 1.1, 55, 5], [7.4, 3.4, .98, 1.1], [10, 3.8, .96, 1.2], [14, 4.2, .94, 1.25], [19, 4.6, .9, 1.25]]
@@ -57,7 +64,8 @@ async function boot() {
   addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 
   // ---- input
-  const player = new Player(); player.foe = enemy;
+  const player = new Player(); player.foe = enemy; player.boss = giant;
+  if (q.has('boss')) { enemy.n = enemy.total; enemy.spawn(); player.p[0] = -1; player.p[2] = -4; player.p[1] = height(-1, -4); player.home = [-1, -4]; } // straight to the giant
   const cam = { yaw: Math.PI, pitch: -0.36, dist: 6.2 };
   const keys = new Set();
   let actHeld = false, guardHeld = false, dodgeNow = false, drawer = false, timing = q.has('timing'), ms = null, probeText = '';
@@ -99,7 +107,7 @@ async function boot() {
 
   const demo = DEMOS[q.get('demo')] ?? null, override = { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false };
   const DT = sim.par.dt;
-  let hold = 0, clock = 0, flash = 0, kick = 0;
+  let hold = 0, clock = 0, flash = 0, kick = 0, gcam = 0;
   const tgt = new THREE.Vector3(), eye = new THREE.Vector3(), want = new THREE.Vector3();
   let camReady = false;
 
@@ -108,8 +116,20 @@ async function boot() {
     const dt = hold > 0 ? (hold--, DT * .05) : DT; sim.par.dt = dt; clock += dt;
     const t = clock;
     if (demo) demo(t, player, cam, override);
-    player.update(dt, demo ? override : input(), cam, enemy.alive ? enemy.p : null);
+    player.update(dt, demo ? override : input(), cam, enemy.alive ? enemy.p : giant.aim(player.p));
+    pushOut(player.p, .32, giant.solids()); // its feet, and a hand lying on the ground, are in the way
     enemy.update(dt, player.p);
+    // the giant: every stamp and blow shakes the picture, throws ink up and blows the fog and the smoke open
+    const gev = giant.update(dt, player, enemy.mode === 'done'), cut = giant.struck(player); if (cut) gev.push(cut);
+    for (const ev of gev) {
+      const [sh, fl, kk, hd, r, div, n, size] = { wake: [.9, 0, 0, 0, 3, 16, 0, 1], roar: [1.7, .2, .5, 0, 4.5, 34, 0, 1], step: [.8, 0, .2, 0, 2.6, 16, 20, 1], stomp: [2.8, .3, .9, 8, 5, 55, 90, 1.15], slam: [3.2, .55, 1, 11, 4.5, 60, 100, 1.15], struck: [1.3, .3, .5, 6, 2, 18, 50, 1], cut: [.9, .22, .4, 5, 2, 16, ev.big ? 70 : 34, 1.4] }[ev.kind];
+      shake = Math.max(shake, sh); flash = Math.max(flash, fl); kick = Math.max(kick, kk); hold = Math.max(hold, hd);
+      fx.push({ a: ev.at, r, ink: 0, div, life: .3, t: 0 });
+      if (n) splash.burst(ev.at, ev.dir ?? [0, 0], n, size);
+      if (sh > 1.5) blasts.push({ p: [ev.at[0], ev.at[1] + (ev.kind === 'roar' ? 0 : 1.2), ev.at[2]], r: ev.kind === 'roar' ? 8 : 11, split: 300, den: ev.kind === 'roar' ? -12 : -40, life: .7, t: 0 });
+      if (ev.kind === 'wake') player.home = [-1, -6];
+      if (ev.kind === 'struck') taken++; else if (ev.kind === 'cut') dealt++;
+    }
     for (const ev of spar(player, enemy)) { // every blow lands as a burst of ink and air
       const big = ev.kind === 'kill' || ev.kind === 'clash' || ev.kind === 'parry' || ev.kind === 'down';
       if (ev.kind === 'dodge') { warded++; continue; }
@@ -119,10 +139,13 @@ async function boot() {
       flash = Math.max(flash, steel ? 1 : big ? .45 : .22); kick = Math.max(kick, steel ? 1 : big ? .6 : .35);
       fx.push({ a: ev.at, r: big ? 2.6 : 1.9, ink: 0, div: big ? 26 : 16, life: .2, t: 0 }); // a shock that blows the fog open around the blow
       player.shake = Math.max(player.shake, big ? 1.3 : .8);
+      if (ev.kind === 'kill') player.home = [enemy.p[0], enemy.p[2]]; // fall after this and you come back here
       if (ev.kind === 'taken' || ev.kind === 'down') taken++; else if (ev.kind === 'cut' || ev.kind === 'kill' || ev.kind === 'push') dealt++; else if (ev.kind === 'parry' || ev.kind === 'block') warded++;
     }
     for (let i = fx.length - 1; i >= 0; i--) if ((fx[i].t += dt) > fx[i].life) fx.splice(i, 1);
-    sim.emitters = [...player.emitters(), ...enemy.emitters(), ...fx.map(e => ({ a: e.a, r: e.r, ink: e.ink, div: e.div * Math.sin(Math.PI * e.t / e.life) }))];
+    for (let i = blasts.length - 1; i >= 0; i--) if ((blasts[i].t += dt) > blasts[i].life) blasts.splice(i, 1);
+    const pe = player.emitters(); // the two slow gusts come last: they are the first to go if there are too many
+    sim.emitters = [...pe.slice(0, -2), ...enemy.emitters(), ...giant.emitters().filter(inBox), ...fx.map(e => ({ a: e.a, r: e.r, ink: e.ink, div: e.div * Math.sin(Math.PI * e.t / e.life) })), ...pe.slice(-2)];
     sim.follow(player.p[0], player.p[2]); fog.u.boxMin.value.set(...sim.org);
     const timed = timing && frame % 20 === 0 ? sim.step(true) : (sim.step(), null);
     timed?.then(r => { if (r) ms = r; });
@@ -134,6 +157,7 @@ async function boot() {
     beasts.forEach((b, i) => { b.visible = i === f - 1; });
     const pose = { p: player.p, yaw: player.yaw, phase: player.phase, run, act, side: player.side, windup: 0, stagger: player.stagger / .45, fade, guard: player.guard, vy: player.v[1], time: t };
     if (f === 0) hero.update(dt, pose, camera.position); else beasts[f - 1].update(dt, pose, camera.position);
+    oni.update(dt, giant, camera.position);
     if (shade.group.visible) shade.update(dt, { p: enemy.p, yaw: enemy.yaw, phase: enemy.phase, run: Math.min(1, Math.hypot(enemy.v[0], enemy.v[2]) / 3.6), act: enemy.actT, side: enemy.side, windup: enemy.windup, stagger: enemy.stagger / .5, fade: enemy.fade, fall: enemy.fallT, melt: enemy.meltT, eyes: true, time: t }, camera.position);
     const bl = player.blade();
     // the sword's light is a crescent: thin where the stroke starts and ends, widest at the snap, reaching in from the tip
@@ -144,12 +168,13 @@ async function boot() {
 
     // ---- camera: follows with a little lag, and shakes when something big happens
     shake = Math.max(player.shake, shake * Math.exp(-7 * dt)); player.shake = 0;
-    want.set(player.p[0], player.p[1] + (f < 2 ? 1.5 : .3), player.p[2]);
+    gcam += ((giant.awake ? 1 : 0) - gcam) * (1 - Math.exp(-1.4 * dt)); // facing the giant the camera drops back and looks up
+    want.set(player.p[0], player.p[1] + (f < 2 ? 1.5 : .3) + 1.1 * gcam, player.p[2]);
     if (!camReady) tgt.copy(want); else tgt.lerp(want, 1 - Math.exp(-14 * dt));
     if (cam.fixed) { eye.set(...cam.fixed.pos); tgt.set(...cam.fixed.look); }
     else {
-      const cp = Math.cos(cam.pitch), dist = cam.dist * [1, 1.2, 1.5, 1.15][f];
-      want.set(tgt.x - Math.sin(cam.yaw) * cp * dist, tgt.y - Math.sin(cam.pitch) * dist, tgt.z - Math.cos(cam.yaw) * cp * dist);
+      const pitch = Math.min(.9, cam.pitch + .36 * gcam), cp = Math.cos(pitch), dist = cam.dist * [1, 1.2, 1.5, 1.15][f] * (1 + .7 * gcam);
+      want.set(tgt.x - Math.sin(cam.yaw) * cp * dist, tgt.y - Math.sin(pitch) * dist, tgt.z - Math.cos(cam.yaw) * cp * dist);
       const cq = [want.x, 0, want.z]; pushOut(cq, .45); want.x = cq[0]; want.z = cq[2]; // the camera does not sit inside a trunk
       want.y = Math.max(want.y, height(want.x, want.z) + .6);
       if (!camReady) eye.copy(want); else eye.lerp(want, 1 - Math.exp(-9 * dt));
@@ -166,6 +191,8 @@ async function boot() {
     if (bl) stir.push(edge(bl, bl.snap));
     if (enemy.present) stir.push({ p: [enemy.p[0], enemy.p[1] + 1, enemy.p[2]], v: enemy.v, r: 1.7, drag: 30, gain: 1.2 });
     if (eb) stir.push(edge(eb, eb.snap));
+    stir.push(...giant.stir());
+    for (const b of blasts) { const k = b.t / b.life; stir.push({ p: b.p, v: [0, 0, 0], r: 2 + (b.r - 2) * k, drag: 0, reach: 12, split: b.split * (1 - k), den: b.den * (1 - k) }); }
     const e = camera.matrixWorld.elements, tanY = Math.tan(camera.fov * Math.PI / 360), focal = VH / (2 * tanY);
     camera.getWorldDirection(fwd);
     const camInfo = { y: camera.position.y, tanY, aspect: camera.aspect, fy: fwd.y, uy: e[5], ry: e[1] };
@@ -188,7 +215,7 @@ async function boot() {
           if (wc > .03) splats.push({ x: cx - hx, y: cy - hy, x2: cx + hx, y2: cy + hy, r: s.r / zc * focal, w: wc, vx, vy, den: s.den, drag: s.drag, split: s.split / zc * focal });
           continue;
         }
-        splats.push({ x: a[0], y: a[1], r: s.r / a[2] * focal, w, vx, vy, den: 0, drag: s.drag });
+        splats.push({ x: a[0], y: a[1], r: s.r / a[2] * focal, w, vx, vy, den: s.den ?? 0, drag: s.drag, split: (s.split ?? 0) / a[2] * focal });
       }
       v.step(vf, dt, t, [c[0] - VW / 2, c[1] - VH / 2], camInfo, splats);
     }
@@ -197,6 +224,10 @@ async function boot() {
     flash *= Math.exp(-16 * DT); kick *= Math.exp(-9 * DT); fog.u.flash.value = flash * .55;
     camera.fov = 50 - 6 * kick; camera.updateProjectionMatrix();
     stage.reeds.time.value = t; stage.reeds.a.value.set(...player.p); stage.reeds.b.value.set(enemy.p[0], enemy.present ? enemy.p[1] : -99, enemy.p[2]);
+    // the reeds give way under the giant's feet and its hands, and a stamp sends a wave through the whole field
+    const gp = giant.parts, press = stage.reeds.press, hand = gp && (giant.planted || giant.crouch > .5) ? gp[giant.side > 0 ? 'handL' : 'handR'] : null;
+    if (gp) { press[0].value.set(...gp.footL, 2.6); press[1].value.set(...gp.footR, 2.6); press[2].value.set(hand ? hand[0] : 0, hand ? hand[1] - .4 : -99, hand ? hand[2] : 0, 2.8); }
+    const rg = giant.ring; stage.reeds.ring.value.set(rg ? rg.at[0] : 0, rg ? rg.at[2] : 0, rg ? rg.r : 0, rg ? 1.5 * Math.max(0, 1 - rg.r / 15) : 0);
     fog.u.time.value = t;
     fog.u.hero.value.set(player.p[0], player.p[1] + (f < 2 ? .95 : 0), player.p[2]); fog.u.heroR.value = [1.4, 1.6, 2.4, 1.6][f];
     fog.u.hero2.value.set(enemy.p[0], !enemy.present ? -99 : enemy.p[1] + .95, enemy.p[2]);
@@ -207,9 +238,9 @@ async function boot() {
     if (frame % 10 === 0) {
       const tot = ms ? Object.values(ms).reduce((a, b) => a + b, 0) : 0;
       const pips = (n, of) => '●'.repeat(Math.max(0, n)) + '○'.repeat(of - Math.max(0, n));
-      let s = `${FORMS[f]}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? enemy.hp : 0, 3)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
+      let s = `${FORMS[f]}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? enemy.hp : 0, 3)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? '  巨相撲鬼' : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
       if (drawer) {
-        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n1 人 2 虎 3 鶴 4 鯉 · 左鍵／F 出招 · 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（鶴鯉為下降）\nV 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
+        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n1 人 2 虎 3 鶴 4 鯉 · 左鍵／F 出招 · 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（鶴鯉為下降）\n巨相撲鬼：四股的震波要跳過或閃過 · 巨掌落下前走開 · 手掌貼地時可以斬\nV 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
         if (ms) s += '\n\n' + Object.entries(ms).map(([k, v]) => `${k.padEnd(18)}${v.toFixed(2)} ms`).join('\n');
         if (probeText) s += '\n\n' + probeText;
       }
@@ -222,8 +253,8 @@ async function boot() {
   window.__probe = () => sim.probe();
   // wall time per frame with the GPU drained each frame: sim + render, no vsync
   window.__bench = async k => { const t0 = performance.now(); for (let i = 0; i < k; i++) { tick(); await device.queue.onSubmittedWorkDone(); } return (performance.now() - t0) / k; };
-  window.__state = () => ({ frame, ms, p: player.p, form: player.form, hp: player.hp, dealt, taken, warded, foe: enemy.mode });
-  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; } };
+  window.__state = () => ({ frame, ms, p: player.p, form: player.form, hp: player.hp, dealt, taken, warded, foe: enemy.mode, boss: giant.mode, parts: giant.parts, target: giant.target, planted: giant.planted && giant.fall >= 1 && giant.ik >= 1, side: giant.side, foot: giant.parts ? ['footL', 'footR'].map(k => giant.parts[k][1] - height(giant.parts[k][0], giant.parts[k][2])) : null });
+  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
   if (q.has('manual')) { tick(); window.__done = true; return; }
   renderer.setAnimationLoop(tick);
   window.__done = true;
