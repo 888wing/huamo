@@ -444,6 +444,41 @@ Not done from the plan's first item: the skid when stopping from a run has no po
 deceleration, nothing more); a hard landing rolls only when the fall is faster than 13 m/s, which nothing in the
 slice reaches yet; the hat does not lag behind the head. Seen only as frame strips and in two recordings, not played.
 
+## Round 23 (2026-11-15): changing form
+
+Step 3 of [PLAN-NEXT.md](PLAN-NEXT.md): a beast comes from pressing a move's key again in the middle of the move.
+
+- `player.js`: `shift(f)` and `revert(move, foe)`. Jump pressed again in the air is the crane; dodge pressed again
+  during a hop or a roll is the tiger; guard pressed twice within 0.4 s is the carp. One gauge, `ink` (0..1), is
+  shared: a beast spends it at 1/`SHIFT_TIME` (5 s from full), the swordsman regains it at 1/`REFILL` (8 s) plus
+  `INK_PER_CUT` (0.1) for every cut that lands; below `SHIFT_MIN` (1/3) a change is refused. When the ink is gone
+  the form reverts where it is (a crane's rider falls, and a long fall ends in the hard-landing roll). A press of
+  attack as a beast reverts early with a blow: tiger -> the overhead cut out of a pounce, crane -> the stab from the
+  air, carp -> the rising cut out of the fog. A blow taken knocks the beast out of it. The change itself lasts
+  `MORPH` (0.22 s) and nothing can hurt during it. A beast's old own move (roar, hard wing-beat) is on the guard
+  key, since attack now means "back to the sword". `setForm()` (demos, the number keys with `?debug`) sets `free`:
+  no gauge, no limit, and the beast's move stays on attack.
+- The change is drawn with both bodies present for those 0.22 s (`main.js`): the one leaving gets `streak` (the
+  swordsman is drawn up into a vertical streak, or down into the fog when the carp is coming; a beast is drawn out
+  along its length), the one arriving gets `grow` (swells from a fifth of its size; the crane's wings come up
+  folded and open, the tiger arrives curled with forepaws reaching and straightens). A small breath of ink and a
+  push on the smoke layers mark the spot.
+- The gauge on screen is one brush stroke (inline SVG with a turbulence filter) at the foot of the picture: it
+  shortens as it is spent, paper-coloured streaks show through as it dries, it greys below a third, and the
+  character beside it names the beast. It is hidden while full.
+- Demo `shift` (`SHIFT_SEQ`), `tools/check-shift.mjs`.
+
+Measured by `check-shift.mjs`: crane 2.40 s out with the stab, tiger 2.27 s out with the overhead cut, carp 2.50 s
+out with the rising cut; a full gauge lasts 5.017 s (301 frames); ink returns at 0.1250 per second; horizontal speed
+carried over the change 100 %, 91 % and 100 %; a second jump pressed with the gauge at 0.32 changed nothing.
+Regression on the procedural build, no console errors: `spar`, `ward` (the double-tap for the carp is not set off by
+ordinary guarding: 17 blows warded, form unchanged), `journey` to 100 s, `boss`, `stand`, `moves` (numbers unchanged
+from round 22). Whole frame, tour demo: 8.3 ms at 720p, 11.2 ms at 1080p. `dist/smoke-procedural.html` 993.3 KB raw,
+290.1 KB gzip; `dist/index.html` 385.0 KB gzip.
+
+Not done: the beasts' rigs and motion are as they were in round 4 (step 4 is next); the tiger does not yet run on
+surfaces; a beast has no reaction of its own to a blow, it just reverts. Seen as frame strips and two recordings.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

@@ -455,7 +455,11 @@ export class Figure {
     const py = pivot * (1 - Math.cos(pitch)), pz = -pivot * Math.sin(pitch);
     g.position.set(st.p[0] + sy * pz, st.p[1] + rootY + py + .17 * fe, st.p[2] + cy * pz);
     g.rotation.set(pitch - 1.5 * fe, yaw, roll);
-    g.scale.set(sc * (1 + .35 * melt), sc * (1 + .12 * melt), sc * (1 - .9 * melt));
+    // changing form: leaving, the figure is drawn up into a streak of ink; arriving, it swells out of one
+    // (into the carp it goes down into the fog instead: the carp is under the surface)
+    const sk = st.streak ?? 0, gr = .2 + .8 * (st.grow ?? 1), sink = st.form === 3 ? sk : 0;
+    g.position.y -= 1.1 * sink * sink;
+    g.scale.set(sc * (1 + .35 * melt) * (1 - .9 * sk) * gr, sc * (1 + .12 * melt) * (1 + .3 * sk - .6 * sink) * gr, sc * (1 - .9 * melt) * (1 - .9 * sk) * gr);
     g.updateMatrixWorld(true);
     // ---- legs: on the ground they reach for the feet's planted points
     qYaw.setFromAxisAngle(UP, yaw);

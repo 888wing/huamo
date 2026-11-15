@@ -25,6 +25,9 @@ export function swordTiming(t, combo) {
 export const HP = 5;
 // dodges: a hop straight back when no direction is held, a roll when one is. [duration s, distance m, untouchable from, to (s)]
 const HOP = [.30, 3.2, .05, .22], ROLL = [.42, 4.2, .06, .30];
+// Beasts. One gauge of ink is shared by all three: full, it lasts SHIFT_TIME as a beast; as a man it comes back in
+// REFILL seconds, and each cut that lands gives a little more. Below SHIFT_MIN no change is possible.
+export const SHIFT_TIME = 5, REFILL = 8, SHIFT_MIN = 1 / 3, MORPH = .22, INK_PER_CUT = .1;
 export const DEATH = 2.6; // kneel, fall, run out into ink, gather again at the last safe spot
 const BURST = 0.32, SHAKE = [.14, .7, .16, .1];
 const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
@@ -78,22 +81,53 @@ export class Player {
     this.act = 0; this.cool = 0; this.side = 1; this.ground = true; this.phase = 0; this.burst = 0; this.shake = 0; this.t = 0; this.stagger = 0; this.hit = false;
     this.combo = 0; this.comboWindow = 0; this.comboQueued = false; this.attackHeld = false;
     this.hp = HP; this.dodge = 0; this.dodgeCool = 0; this.guard = false; this.guardT = 0; this.fallen = 0; this.dv = [0, 0]; this.home = [...START];
-    this.airT = 0; this.land = 0; this.landHard = false; this.jumpHeld = false;
+    this.airT = 0; this.land = 0; this.landHard = false; this.jumpHeld = false; this.dodgeWas = false;
     this.dodgeKind = 0; this.dodgeDur = 1; this.dashT = 0;                 // dodgeKind: 1 hop back, 2 roll, 3 the tiger's dash
     this.guardK = 0; this.blockT = 0; this.parryT = 0; this.counter = 0;   // counter: time left in which a parried enemy takes double
     this.hurtT = 0; this.hurtDur = .3; this.hurtKind = 0; this.hurtDir = [0, 1];
     this.ko = 0; this.koT = 0;                                             // thrown: 1 in the air, 2 on the ground, 3 getting up
     this.plunge = 0; this.plungeT = 0; this.plungeHit = false;             // the stab from the air: 1 falling, 2 the sword in the ground
     this.events = [];                                                      // what the caller turns into fog, shake and sound: jump, land, plunge, down
+    this.ink = 1; this.free = false;                                       // free: a form set directly (demos, debug keys) does not drain
+    this.morphT = 0; this.morphFrom = 0; this.guardTap = 9; this.guardWas = false;
+  }
+  // Into a beast, out of the move in progress. The body keeps the speed it had.
+  shift(f) {
+    if (this.ink < SHIFT_MIN || f === this.form || this.morphT > 0) return false;
+    const { p, v } = this;
+    this.morphFrom = this.form; this.morphT = MORPH; this.form = f; this.free = false;
+    this.act = 0; this.cool = 0; this.combo = 0; this.clearCombo(); this.plunge = 0; this.guard = false; this.land = 0; this.hit = false;
+    if (f === 2) { v[1] = Math.max(v[1], 3.5); this.ground = false; }                                   // the jump becomes flight
+    if (f === 1 && this.dodge > 0) { this.yaw = Math.atan2(this.dv[0], this.dv[1]); }                   // the roll comes out as the tiger's run
+    this.dodge = 0; this.dodgeCool = .25;
+    this.events.push({ kind: 'shift', to: f, at: [...p] });
+    return true;
+  }
+  // Back to the swordsman: when the ink runs out (move = false), or early on a press of attack, which comes out as a blow:
+  // the tiger's pounce ends in the overhead cut, the crane drops into the stab, the carp rises out of the fog with the rising cut.
+  revert(move, foe) {
+    const { p, v } = this, from = this.form; if (from === 0) return;
+    this.morphFrom = from; this.morphT = MORPH; this.form = 0; this.free = false; this.act = 0; this.cool = 0; this.hit = false; this.dodge = 0;
+    const gh = height(p[0], p[2]);
+    if (from === 3) p[1] = Math.max(p[1] - .5, gh);
+    this.ground = p[1] <= gh + .02; this.airT = this.ground ? 0 : .2;
+    if (move) {
+      const F = [Math.sin(this.yaw), Math.cos(this.yaw)];
+      if (from === 1) { this.startSword(2, foe); v[0] += Math.sin(this.yaw) * 5; v[2] += Math.cos(this.yaw) * 5; v[1] = 4.2; this.ground = false; this.airT = .2; this.lunged = true; }
+      else if (from === 2) { if (!this.ground) { this.plunge = 1; this.plungeT = 0; v[1] = Math.min(v[1], -9); v[0] *= .35; v[2] *= .35; } else this.startSword(0, foe); }
+      else { this.startSword(1, foe); v[0] += F[0] * 3; v[2] += F[1] * 3; v[1] = 5; this.ground = false; this.airT = .2; }
+    }
+    this.events.push({ kind: 'shift', to: 0, from, at: [...p] });
   }
   // untouchable: inside a dodge's window, while getting up, while changing form
   get invuln() {
     const e = this.dodgeDur - this.dodge, w = this.dodgeKind === 1 ? HOP : ROLL;
-    return (this.dodge > 0 && (this.dodgeKind === 3 || (e > w[2] && e < w[3]))) || this.ko >= 2 || this.burst > 0 || this.fallen > 0;
+    return (this.dodge > 0 && (this.dodgeKind === 3 || (e > w[2] && e < w[3]))) || this.ko >= 2 || this.burst > 0 || this.fallen > 0 || this.morphT > 0;
   }
   // A blow lands. kind: 1 a cut (a flinch), 2 a heavy blow (a stumble), 3 thrown off the feet. Returns true if it kills.
   hurt(kind, from, power, back) {
     const { p, v } = this, dx = p[0] - from[0], dz = p[2] - from[2], l = Math.hypot(dx, dz) || 1;
+    if (this.form !== 0) { this.morphFrom = this.form; this.morphT = MORPH; this.form = 0; this.free = false; } // a blow knocks the beast out of it
     this.hp -= power; this.act = 0; this.clearCombo(); this.dodge = 0; this.plunge = 0; this.guard = false;
     v[0] = dx / l * back; v[2] = dz / l * back;
     if (kind === 3 || this.hp <= 0) this.yaw = Math.atan2(-dx, -dz); // it goes over backwards, facing what hit it
@@ -111,9 +145,10 @@ export class Player {
       run: Math.min(1, Math.hypot(v[0], v[2]) / SPEED[this.form]), act: this.actT, combo: this.combo, side: this.side, windup: 0, stagger: 0,
       guardK: this.guardK, blockT: this.blockT, parryT: this.parryT, dodgeKind: this.dodge > 0 ? this.dodgeKind : 0, dodgeU: 1 - this.dodge / this.dodgeDur,
       hurtU: this.hurtT > 0 ? 1 - this.hurtT / this.hurtDur : -1, hurtKind: this.hurtKind, hurtDir: this.hurtDir, ko: this.ko, koT: this.koT,
-      plunge: this.plunge, plungeT: this.plungeT, death: this.fallen > 0 ? 1 - this.fallen / DEATH : 0, fade, time };
+      plunge: this.plunge, plungeT: this.plungeT, death: this.fallen > 0 ? 1 - this.fallen / DEATH : 0, fade, time, form: this.form };
   }
-  setForm(f) { if (f !== this.form) { this.form = f; this.act = 0; this.combo = 0; this.clearCombo(); this.burst = BURST; this.shake = .25; } } // momentum carries over
+  // a form set directly, for demos and debugging: no gauge, no time limit
+  setForm(f) { if (f !== this.form) { this.form = f; this.free = f !== 0; this.act = 0; this.combo = 0; this.clearCombo(); this.burst = BURST; this.shake = .25; this.morphT = 0; } } // momentum carries over
   get swordMove() { return SWORD_MOVES[this.combo]; }
   get actT() { return this.act > 0 ? 1 - this.act / (this.form === 0 ? this.swordMove.duration : ACT[this.form]) : -1; }
   get burstT() { return this.burst / BURST; }
@@ -133,16 +168,24 @@ export class Player {
   // inp: { x, z (-1..1 move), up, down, act }, cam: { yaw, pitch }, foe: position of an enemy to face when striking, or null
   update(dt, inp, cam, foe) {
     const { p, v } = this, f = this.form;
-    const pressed = !!inp.act && !this.attackHeld, jumpPressed = !!inp.up && !this.jumpHeld;
-    this.attackHeld = !!inp.act; this.jumpHeld = !!inp.up;
+    const pressed = !!inp.act && !this.attackHeld, jumpPressed = !!inp.up && !this.jumpHeld, dodgePressed = !!inp.dodge && !this.dodgeWas;
+    this.attackHeld = !!inp.act; this.jumpHeld = !!inp.up; this.dodgeWas = !!inp.dodge;
     if (this.fallen > 0) { // cut down: it kneels, falls and runs out into ink where it lies, then gathers again at the last safe spot
       this.act = 0; this.clearCombo(); this.guard = false; this.guardK = 0;
       this.fallen -= dt; v[0] *= Math.exp(-6 * dt); v[2] *= Math.exp(-6 * dt); v[1] -= 22 * dt;
       walk(p, v, dt, .7); p[1] = Math.max(height(p[0], p[2]), p[1] + v[1] * dt); if (p[1] <= height(p[0], p[2])) v[1] = 0;
-      if (this.fallen <= 0) { p[0] = this.home[0]; p[2] = this.home[1]; p[1] = height(p[0], p[2]); v.fill(0); this.hp = HP; this.burst = BURST; this.stagger = 0; this.ground = true; this.ko = 0; }
+      if (this.fallen <= 0) { p[0] = this.home[0]; p[2] = this.home[1]; p[1] = height(p[0], p[2]); v.fill(0); this.hp = HP; this.ink = 1; this.burst = BURST; this.stagger = 0; this.ground = true; this.ko = 0; }
       this.t += dt;
       return;
     }
+    // the gauge: a beast spends it, the swordsman gets it back
+    this.morphT = Math.max(0, this.morphT - dt);
+    const guardPressed = !!inp.guard && !this.guardWas; this.guardWas = !!inp.guard; this.guardTap += dt;
+    if (f !== 0 && !this.free) {
+      this.ink -= dt / SHIFT_TIME;
+      if (this.ink <= 0) { this.ink = 0; this.revert(false, foe); return this.update(0, inp, cam, foe); }
+      if (pressed && this.morphT <= 0) { this.revert(true, foe); return this.update(0, { ...inp, act: true }, cam, foe); }
+    } else if (f === 0) this.ink = Math.min(1, this.ink + dt / REFILL);
     // thrown off the feet: nothing answers until it has landed, lain a moment and got up; a press of jump in the air lands it standing
     const helpless = this.ko > 0 || this.plunge === 2;
     if (this.ko) {
@@ -170,7 +213,13 @@ export class Player {
     v[0] += (d[0] * SPEED[f] * slow - v[0]) * k; v[2] += (d[2] * SPEED[f] * slow - v[2]) * k;
     // dodge: a short dash the way we are moving (or straight back), untouchable while it lasts
     this.dodgeCool -= dt;
-    if (inp.dodge && f < 2 && this.dodge <= 0 && this.dodgeCool <= 0 && this.stagger <= 0 && this.ground && !this.plunge) {
+    // ---- the same key again, in the middle of the move, is the change of form
+    if (f === 0 && !helpless && this.stagger <= 0 && this.act <= 0) {
+      if (dodgePressed && this.dodge > 0 && this.dodgeDur - this.dodge > .06 && this.shift(1)) return this.update(0, inp, cam, foe);   // dodge, dodge: the tiger
+      if (jumpPressed && !this.ground && this.airT > .08 && !this.plunge && this.shift(2)) return this.update(0, inp, cam, foe);                       // jump, jump: the crane
+      if (guardPressed) { if (this.guardTap < .4 && this.ground && this.shift(3)) return this.update(0, { ...inp, guard: false }, cam, foe); this.guardTap = 0; }  // guard, guard: the carp
+    }
+    if (dodgePressed && f < 2 && this.dodge <= 0 && this.dodgeCool <= 0 && this.stagger <= 0 && this.ground && !this.plunge) {
       // no direction held: a hop straight back, still facing the threat. A direction held: a roll that way
       this.dodgeKind = f === 1 ? 3 : len > .1 ? 2 : 1;
       this.dodgeDur = this.dodgeKind === 3 ? .28 : this.dodgeKind === 2 ? ROLL[0] : HOP[0];
@@ -249,7 +298,7 @@ export class Player {
         }
       }
     } else if (this.act > 0) this.act -= dt;
-    else if (inp.act && this.cool <= 0 && this.stagger <= 0 && !this.guard && this.dodge <= 0) {
+    else if ((this.free ? inp.act : inp.guard) && this.cool <= 0 && this.stagger <= 0 && this.dodge <= 0) { // a beast's own move (roar, wing-beat): on the guard key once attack means "back to the sword"
       this.act = ACT[f]; this.cool = COOL[f]; this.side = -this.side; this.shake = SHAKE[f]; this.hit = false; this.lunged = false;
     }
     this.burst = Math.max(0, this.burst - dt); this.t += dt;
@@ -393,6 +442,7 @@ export function spar(pl, en) {
       const impact = move?.impact ?? 1;
       const contact = swordContact(pl.blade(), en);
       ev.push({ kind: en.hurt(pl.p, (move?.power ?? 1) * (pl.counter > 0 ? 2 : 1), impact) ? 'kill' : 'cut', impact, ...contact });
+      pl.ink = Math.min(1, pl.ink + INK_PER_CUT);
     }
   }
   // the stab from the air: whatever stands where it comes down takes a heavy blow

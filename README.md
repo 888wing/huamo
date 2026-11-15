@@ -14,7 +14,8 @@ Open `dist/smoke-procedural.html` (or `dist/index.html` for the photographed smo
 | mouse (click the page first) | look |
 | `Space` | jump: a tap is low, a held press high (climb as crane or carp). Pressed in the air after being thrown: land standing |
 | `Shift` | dodge: a hop back with no direction held, a roll with one (descend as crane or carp) |
-| `1` `2` `3` `4` | 人 sword stroke · 虎 roar · 鶴 wing-beat · 鯉 swim |
+| the same key again | changes form, out of the move: jump again in the air = 鶴 crane, dodge again mid-dodge = 虎 tiger, guard twice quickly = 鯉 carp. All three spend one gauge of ink (the brush stroke at the foot of the screen): 5 s from full, 8 s to refill, a third needed to change. As a beast, attack returns to the sword with a blow and guard is the beast's own move. |
+| `1` `2` `3` `4` | with `?debug` only: set a form directly, no gauge |
 | left mouse or `F` | the form's action. Tap again during each human swing to link a rising slash and an overhead finish. In the air: a stab downwards. Late in a dodge: a cut straight out of it. |
 | right mouse or `Q` | guard (raised just in time: a parry) |
 | `V` | top-down slice of the simulation |
@@ -23,7 +24,7 @@ Open `dist/smoke-procedural.html` (or `dist/index.html` for the photographed smo
 | `R` | reset the fog |
 | `Tab` | help and details |
 
-URL options: `?f32=1` (32-bit float fields), `?n=96,40,96&h=0.25` (box cells and cell size), `?cycles=2` (pressure accuracy), `?dpr=2` (pixel ratio cap, default 1.5), `?demo=moves|journey|combo|fogwalk|reeds|smokecut|spar|ward|boss|stand|oni|spin|tour|slash|roar|flap|carp`, `?steps=56` (march steps through the 3D fog, default 28), `?arena` (start at the first clearing with normal controls), `?boss` (skip the four shadows and start near the giant).
+URL options: `?f32=1` (32-bit float fields), `?n=96,40,96&h=0.25` (box cells and cell size), `?cycles=2` (pressure accuracy), `?dpr=2` (pixel ratio cap, default 1.5), `?demo=moves|shift|journey|combo|fogwalk|reeds|smokecut|spar|ward|boss|stand|oni|spin|tour|slash|roar|flap|carp`, `?steps=56` (march steps through the 3D fog, default 28), `?arena` (start at the first clearing with normal controls), `?boss` (skip the four shadows and start near the giant).
 
 The path opens into a clearing for the first duel before heading north through the reeds. Defeat four ink shadows one after another, and the giant (巨相撲鬼) rises at the path's end. Jump or dodge through its shock wave, and cut its hand while it lies on the ground. It cannot be defeated yet.
 
@@ -57,6 +58,7 @@ tools/ta.sh "?f32=0" "?f32=1"   # solver numbers (build dist/t-a.html first: see
 node tools/bench.mjs [page]      # whole-frame cost at 720p and 1080p
 node tools/check-spar.mjs spar   # the four shadows; `ward` = defence only; `journey 110` = shadows, then the giant
 node tools/check-moves.mjs       # the swordsman's motion: foot slide, dodge distances, jump heights, recovery times
+node tools/check-shift.mjs       # changing form: how long a gauge lasts, how fast it refills, speed across the change
 tools/strip.sh moves roll 16.9 17.8 4   # a close-up strip of one stretch of a demo (start s, end s, frames between shots)
 node tools/check-boss.mjs 60     # the giant: mode sequence, where its hand lands, feet on the ground; `60 stand` = a player who does not defend
 PAGE=dist/smoke-procedural.html node tools/check-spar.mjs journey 110   # any check against the other build

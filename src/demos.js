@@ -19,6 +19,15 @@ export const MOVE_SEQ = [
   ['home', 1.0], ['face', .3], ['death', 3.6],
 ];
 
+// The shift demo. Pressing the same key twice is two steps with a gap between: jump, -, jump.
+export const SHIFT_SEQ = [
+  ['-', .4], ['run', .5], ['jump', .12], ['run', .14], ['jump', .1], ['fly', 2.3], ['cut', .1], ['-', 1.3],          // jump, jump: the crane; attack: the stab
+  ['home', 1.6], ['face', .3], ['roll', .08], ['-', .1], ['roll', .08], ['gallop', 2.2], ['cut', .1], ['-', 1.2],    // roll, roll: the tiger; attack: the pounce cut
+  ['home', 2.0], ['face', .3], ['guard', .1], ['-', .1], ['guard', .1], ['swim', 2.4], ['cut', .1], ['-', 1.2],      // guard, guard: the carp; attack: the rising cut
+  ['home', 4.2], ['face', .3], ['run', .4], ['jump', .12], ['run', .14], ['jump', .1], ['soar', 5.6], ['-', 1.2],    // and a flight held until the ink is gone
+  ['run', .4], ['jump', .12], ['run', .14], ['jump', .1], ['-', 1.4],                                                // too little ink yet: the second press does nothing
+];
+
 export const DEMOS = {
   // a sword stroke through standing fog, seen from above the shoulder
   slash(t, player, cam, inp) {
@@ -200,6 +209,25 @@ export const DEMOS = {
       if (t < clock + d) { each[name]?.(); if (first[name]) once(player, 'm' + i, first[name]); player.demoStep = name; break; }
       clock += d;
     }
+  },
+  // The three changes of form, each out of its move and back with its blow (SHIFT_SEQ), then one flight held until the ink
+  // runs out. In the first clearing with the shadows sent away; the camera stands off to one side.
+  shift(t, player, cam, inp) {
+    const [cx, cz] = DUEL_CLEARING.center, p = player.p, mark = [cx - 2.2, cz];
+    once(player, 's', () => { place(player, ...mark); player.setForm(0); player.burst = 0; player.yaw = Math.PI / 2; player.foe.n = player.foe.total; player.foe.spawn(); player.home = [...mark]; });
+    const go = (x, z, k = 1) => { const l = Math.hypot(x, z) || 1; inp.x = -x / l * k; inp.z = z / l * k; };
+    const to = (pt, k) => { const d = Math.hypot(pt[0] - p[0], pt[1] - p[2]); if (d > .25) go(pt[0] - p[0], pt[1] - p[2], Math.min(k, d * .8 + .2)); };
+    const round = () => { const a = Math.atan2(p[2] - cz, p[0] - cx) + .7; go(cx + 3.1 * Math.cos(a) - p[0], cz + 3.1 * Math.sin(a) - p[2]); };   // circle the clearing, 3.1 m out
+    const each = {
+      run: () => go(1, 0), home: () => to(mark, 1), face: () => go(1, 0, .12), jump: () => { go(1, 0); inp.up = 1; }, fly: () => { round(); inp.up = p[1] - height(p[0], p[2]) < 3.2 ? 1 : 0; },
+      glide: () => round(), cut: () => { inp.act = true; }, roll: () => { inp.dodge = true; go(1, 0); }, gallop: () => { round(); inp.x *= .5; inp.z *= .5; }, guard: () => { inp.guard = true; }, swim: () => round(),
+      soar: () => { round(); inp.up = p[1] - height(p[0], p[2]) < 5 ? 1 : 0; },
+    };
+    inp.x = inp.z = inp.up = 0; inp.act = inp.dodge = inp.guard = false; cam.yaw = 0;
+    const lift = Math.max(0, p[1] - height(p[0], p[2])) * .6;
+    cam.fixed = { pos: [cx + (p[0] - cx) * .3, height(cx, cz) + 1.6 + lift, cz + 8.6], look: [p[0], height(cx, cz) + 1.0 + lift, p[2]] };
+    let clock = 0;
+    for (const [name, d] of SHIFT_SEQ) { if (t < clock + d) { each[name]?.(); player.demoStep = name; break; } clock += d; }
   },
   // defence only: stand and answer each raised sword, guarding early, guarding late (a parry), or dodging aside
   ward(t, player, cam, inp) {

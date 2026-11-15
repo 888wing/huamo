@@ -14,7 +14,9 @@ class Rig {
   settle(dt, st, cam, rate = 16, lift = 0) {
     const k = 1 - Math.exp(-rate * dt), g = this.group;
     for (const b of this.bones) { b.rotation.x += (b.t[0] - b.rotation.x) * k; b.rotation.y += (b.t[1] - b.rotation.y) * k; b.rotation.z += (b.t[2] - b.rotation.z) * k; b.t = [0, 0, 0]; }
-    g.position.set(st.p[0], st.p[1] + lift, st.p[2]); g.rotation.y = st.yaw; g.scale.setScalar(1 - .65 * (st.fade ?? 0)); g.updateMatrixWorld(true);
+    // changing form: the body leaving is drawn out along its length into a streak of ink, the one arriving swells up from a point
+    const size = (1 - .65 * (st.fade ?? 0)) * (.2 + .8 * (st.grow ?? 1)), sk = st.streak ?? 0;
+    g.position.set(st.p[0], st.p[1] + lift, st.p[2]); g.rotation.y = st.yaw; g.scale.set(size * (1 - .9 * sk), size * (1 - .9 * sk), size * (1 + .7 * sk)); g.updateMatrixWorld(true);
     this.cloth.update(dt, st.p, st.yaw, g.scale.x, cam);
   }
 }
@@ -44,7 +46,10 @@ export function buildBeasts(scene, noise) {
   T.update = (dt, st, cam) => {
     const w = st.phase * 2.2, r = st.run, roar = st.act >= 0 ? Math.sin(Math.PI * st.act) : 0;
     for (const l of legs) { const a = w + l.off; l.up.t[0] = Math.sin(a) * .95 * r + (l.front ? -.5 * roar : 0); l.lo.t[0] = (l.front ? -1 : 1) * (.25 + Math.max(0, Math.cos(a)) * 1.0 * r); }
-    chest.t[0] = Math.sin(w) * .13 * r - .45 * roar; hips.t[0] = -Math.sin(w) * .13 * r; neck.t[0] = -.15 - .3 * roar + Math.sin(w + 1) * .08 * r; head.t[0] = .2 - .35 * roar; jaw.t[0] = .1 + .75 * roar;
+    // coming out of the roll: curled, forepaws reaching for the ground, then straightening into the run
+    const curl = 1 - (st.grow ?? 1);
+    for (const l of legs) { l.up.t[0] += (l.front ? -1.0 : .7) * curl; l.lo.t[0] += (l.front ? .5 : 1.1) * curl; }
+    chest.t[0] = Math.sin(w) * .13 * r - .45 * roar + .6 * curl; hips.t[0] = -Math.sin(w) * .13 * r - .5 * curl; neck.t[0] = -.15 - .3 * roar + Math.sin(w + 1) * .08 * r; head.t[0] = .2 - .35 * roar; jaw.t[0] = .1 + .75 * roar;
     T.settle(dt, st, cam, 18, Math.abs(Math.sin(w)) * .12 * r);
   };
 
@@ -68,7 +73,9 @@ export function buildBeasts(scene, noise) {
   C.cloth = new Strips(scene, noise, feathers, { grav: 2.5, pull: 22 });
   C.update = (dt, st, cam) => {
     const hard = st.act >= 0, a = Math.sin(st.phase * (hard ? 3 : 1.25)) * (hard ? 1.0 : .5), b = Math.sin(st.phase * (hard ? 3 : 1.25) - 1) * (hard ? .8 : .45) - .12;
-    for (const wg of wings) { wg.a.t[2] = wg.s * a; wg.b.t[2] = wg.s * b; wg.leg.t[0] = 1.45 + st.vy * .03; }
+    // out of the jump: the wings come up folded and open
+    const fold = 1 - (st.grow ?? 1);
+    for (const wg of wings) { wg.a.t[2] = wg.s * (a * (1 - fold) + 1.25 * fold); wg.b.t[2] = wg.s * (b * (1 - fold) - 2.2 * fold); wg.leg.t[0] = 1.45 + st.vy * .03; }
     const stretch = Math.min(1, st.run); n1.t[0] = -.55 + .35 * stretch; n2.t[0] = .4 - .25 * stretch; ch.t[0] = .25 - .1 * stretch + st.vy * .03;
     cg.rotation.x = -st.vy * .05;
     C.settle(dt, st, cam, 22, -a * .1);

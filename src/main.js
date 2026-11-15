@@ -7,7 +7,7 @@ import { buildStage, buildTrail, buildSplash, noiseTexture, external, PAPER } fr
 import { buildGroundInk, HIT_FEEDBACK } from './combat-fx.js';
 import { buildBeasts } from './beasts.js';
 import { createFog } from './fog.js';
-import { Player, Enemy, spar, FORMS, HP } from './player.js';
+import { Player, Enemy, spar, FORMS, HP, MORPH, SHIFT_MIN, INK_PER_CUT } from './player.js';
 import { Figure } from './figure.js';
 import { Giant } from './boss.js';
 import { GiantRig } from './giant.js';
@@ -116,7 +116,7 @@ async function boot() {
     keys.add(e.code);
     if (e.code === 'ShiftLeft') dodgeNow = true;
     const f = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
-    if (f >= 0) player.setForm(f);
+    if (f >= 0 && q.has('debug')) player.setForm(f); // forms on the number keys are for debugging: in play a form comes from pressing a move's key again
     if (e.code === 'KeyR') sim.reset();
     if (e.code === 'KeyV') { view = view === 'fog' ? 'slice' : 'fog'; fog.use(view); }
     if (e.code === 'KeyT') timing = !timing;
@@ -143,7 +143,18 @@ async function boot() {
   const seal = document.createElement('div');
   seal.textContent = '化墨';
   seal.style.cssText = 'position:fixed;right:22px;bottom:20px;width:34px;padding:5px 0;background:#b3301f;color:#f1e9da;font:600 15px/1.15 "Songti TC","Noto Serif TC",serif;text-align:center;writing-mode:vertical-rl;border-radius:3px;opacity:.86;pointer-events:none';
-  document.body.append(hud, seal);
+  // the ink gauge: one brush stroke at the foot of the picture, shared by all three beasts. It shortens and runs dry as a
+  // beast spends it, and wets again while the swordsman waits. The character beside it names the beast.
+  const gauge = document.createElement('div'), STROKE = 'M8 16 C 70 9, 190 22, 272 13';
+  gauge.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;pointer-events:none;opacity:0;transition:opacity .45s';
+  gauge.innerHTML = `<span style="font:600 23px/1 'Songti TC','Noto Serif TC',serif;color:#121419;width:26px;text-align:center"></span>`
+    + `<svg width="280" height="30" viewBox="0 0 280 30"><defs><filter id="ib" x="-5%" y="-80%" width="110%" height="260%"><feTurbulence type="fractalNoise" baseFrequency=".03 .7" numOctaves="2" seed="4"/><feDisplacementMap in="SourceGraphic" scale="9"/></filter>`
+    + `<mask id="im"><path d="${STROKE}" pathLength="1" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round"/></mask></defs><g filter="url(#ib)">`
+    + `<path d="${STROKE}" fill="none" stroke="#121419" stroke-opacity=".12" stroke-width="12" stroke-linecap="round"/>`
+    + `<path d="${STROKE}" pathLength="1" fill="none" stroke="#121419" stroke-width="12" stroke-linecap="round"/>`
+    + `<g mask="url(#im)" stroke="#ece6d8" fill="none">${[[-3.4, 1.6, '.09 .04 .16 .03'], [.4, 1.1, '.05 .07 .2 .05'], [3.3, 1.8, '.13 .03 .07 .06']].map(([y, w, d]) => `<path d="${STROKE}" pathLength="1" transform="translate(0 ${y})" stroke-width="${w}" stroke-dasharray="${d}"/>`).join('')}</g></g></svg>`;
+  const gGlyph = gauge.firstChild, gInk = gauge.querySelectorAll('g > path')[1], gMask = gauge.querySelector('mask path'), gDry = gauge.querySelector('g[mask]'), gRough = gauge.querySelector('feDisplacementMap');
+  document.body.append(hud, seal, gauge);
   let fps = 60, last = performance.now(), frame = 0, shake = 0;
 
   const demo = DEMOS[q.get('demo')] ?? null, override = { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false };
@@ -167,6 +178,10 @@ async function boot() {
       if (ev.kind === 'jump') fx.push({ a: ev.at, r: 1.3, ink: 0, div: 9, life: .16, t: 0 });
       else if (ev.kind === 'land') { fx.push({ a: ev.at, r: 1.2 + 1.2 * k, ink: 0, div: 8 + 16 * k, life: .2, t: 0 }); shake = Math.max(shake, .3 * k); }
       else if (ev.kind === 'down') { fx.push({ a: ev.at, r: 1.8, ink: 0, div: 14, life: .2, t: 0 }); shake = Math.max(shake, .5); }
+      else if (ev.kind === 'shift') { // the change of form: a breath of ink where the body was, and the smoke stirred
+        fx.push({ a: [ev.at[0], ev.at[1] + (ev.to === 3 || ev.from === 3 ? .4 : 1), ev.at[2]], r: 1.4, ink: .3, div: 8, life: .22, t: 0 });
+        blasts.push({ p: [ev.at[0], ev.at[1] + 1, ev.at[2]], r: 3.2, split: 130, den: -9, life: .35, t: 0 }); flash = Math.max(flash, .08); shake = Math.max(shake, .3);
+      }
       else if (ev.kind === 'plunge') {
         fx.push({ a: ev.at, r: 2.6, ink: 0, div: 34, life: .25, t: 0 }); blasts.push({ p: [ev.at[0], ev.at[1] + .6, ev.at[2]], r: 5, split: 220, den: -22, life: .5, t: 0 });
         splash.burst(ev.at, [0, 0], 30, .8); shake = Math.max(shake, 1.1); kick = Math.max(kick, .5); hold = Math.max(hold, 5);
@@ -193,7 +208,7 @@ async function boot() {
       if (n) splash.burst(ev.at, ev.dir ?? [0, 0], n, size);
       if (sh > 1.5) blasts.push({ p: [ev.at[0], ev.at[1] + (ev.kind === 'roar' ? 0 : 1.2), ev.at[2]], r: ev.kind === 'roar' ? 8 : 11, split: 300, den: ev.kind === 'roar' ? -12 : -40, life: .7, t: 0 });
       if (ev.kind === 'wake') player.home = [-1, -6];
-      if (ev.kind === 'struck') taken++; else if (ev.kind === 'cut') dealt++;
+      if (ev.kind === 'struck') taken++; else if (ev.kind === 'cut') { dealt++; player.ink = Math.min(1, player.ink + INK_PER_CUT); }
     }
     for (const ev of spar(player, enemy)) {
       if (ev.kind === 'dodge') { warded++; continue; }
@@ -226,10 +241,14 @@ async function boot() {
     // ---- bodies: skeletons posed in code on top of the simulation-driven position
     const f = player.form, sp = Math.hypot(player.v[0], player.v[2]), run = Math.min(1, sp / [5.5, 12, 11, 7.5][f]);
     const act = player.actT, fade = .6 * player.burstT ** 2;
-    hero.visible = f === 0; shade.visible = enemy.present;
-    beasts.forEach((b, i) => { b.visible = i === f - 1; });
+    // while the form changes, the body leaving and the body arriving are both there for a moment
+    const morph = player.morphT > 0 ? 1 - player.morphT / MORPH : 1, from = player.morphT > 0 ? player.morphFrom : f;
+    hero.visible = f === 0 || from === 0; shade.visible = enemy.present;
+    beasts.forEach((b, i) => { b.visible = i === f - 1 || i === from - 1; });
     const pose = player.pose(t, fade);
+    pose.grow = morph;
     if (f === 0) hero.update(dt, pose, camera.position); else beasts[f - 1].update(dt, pose, camera.position);
+    if (from !== f) (from === 0 ? hero : beasts[from - 1]).update(dt, { ...pose, grow: 1, streak: morph, act: -1, plunge: 0, dodgeKind: 0 }, camera.position);
     oni.update(dt, giant, camera.position);
     if (shade.group.visible) shade.update(dt, { p: enemy.p, v: enemy.v, yaw: enemy.yaw, phase: enemy.phase, run: Math.min(1, Math.hypot(enemy.v[0], enemy.v[2]) / 3.6), act: enemy.actT, side: enemy.side, windup: enemy.windup, stagger: enemy.stagger / .5, fade: enemy.fade, fall: enemy.fallT, melt: enemy.meltT, eyes: enemy.mode !== 'fall', time: t }, camera.position);
     const bl = player.blade();
@@ -360,11 +379,17 @@ async function boot() {
       const move = f === 0 && act >= 0 ? `  ${['橫斬', '挑斬', '下劈'][player.combo ?? 0]}` : '';
       let s = `${FORMS[f]}${move}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? Math.ceil(enemy.hp) : 0, enemy.maxHp ?? 6)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? '  巨相撲鬼' : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
       if (drawer) {
-        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n1 人 2 虎 3 鶴 4 鯉 · 左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（不按方向＝後跳，按方向＝翻滾；鶴鯉為下降）\n空中按出招＝下突刺 · 閃避尾段按出招＝衝斬 · 被擊飛時按空白＝受身\n巨相撲鬼：四股的震波要跳過或閃過 · 巨掌落下前走開 · 手掌貼地時可以斬\nV 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
+        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（不按方向＝後跳，按方向＝翻滾；鶴鯉為下降）\n空中按出招＝下突刺 · 閃避尾段按出招＝衝斬 · 被擊飛時按空白＝受身\n化獸（共用下方的墨）：跳躍中再按空白＝鶴 · 閃避中再按 Shift＝虎 · 連按兩下格擋＝鯉 · 化獸時按出招＝變回並出招，格擋鍵＝獸的本招\n巨相撲鬼：四股的震波要跳過或閃過 · 巨掌落下前走開 · 手掌貼地時可以斬\nV 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
         if (ms) s += '\n\n' + Object.entries(ms).map(([k, v]) => `${k.padEnd(18)}${v.toFixed(2)} ms`).join('\n');
         if (probeText) s += '\n\n' + probeText;
       }
       hud.textContent = s;
+    }
+    { // the gauge shows whenever it is not simply full
+      const ink = player.ink, beast = f !== 0 && !player.free, low = !beast && ink < SHIFT_MIN, dry = 1 - ink;
+      gauge.style.opacity = beast || ink < .995 ? (beast && ink < .2 ? .55 + .45 * Math.sin(frame * .9) : 1) : 0;
+      gGlyph.textContent = beast ? FORMS[f][0] : ''; gInk.setAttribute('stroke-dasharray', `${Math.max(ink, .0001)} 1`); gMask.setAttribute('stroke-dasharray', `${Math.max(ink, .0001)} 1`);
+      gInk.setAttribute('stroke-opacity', ink < .01 ? 0 : low ? .4 : .92 - .25 * dry); gDry.setAttribute('opacity', Math.min(1, dry * 1.5)); gRough.setAttribute('scale', 9 + 12 * dry);
     }
   }
 
@@ -375,7 +400,7 @@ async function boot() {
   window.__bench = async k => { const t0 = performance.now(); for (let i = 0; i < k; i++) { tick(); await device.queue.onSubmittedWorkDone(); } return (performance.now() - t0) / k; };
   window.__state = () => ({ frame, ms, clock, hold, p: player.p, form: player.form, hp: player.hp, combo: player.combo,
     attack: player.actT, dealt, taken, warded, foe: enemy.mode, enemyHp: enemy.hp, enemyIndex: enemy.n, fall: enemy.fallT, melt: enemy.meltT,
-    step: player.demoStep, vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
+    step: player.demoStep, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
     hero: { ik: hero.ikW, feet: hero.feet.map(f => { const b = hero.B['foot' + f.k].getWorldPosition(tv); return { planted: f.t >= 1, x: b.x, y: b.y, z: b.z }; }) },
     boss: giant.mode, parts: giant.parts, target: giant.target, planted: giant.planted && giant.fall >= 1 && giant.ik >= 1, side: giant.side,
     foot: giant.parts ? ['footL', 'footR'].map(k => giant.parts[k][1] - height(giant.parts[k][0], giant.parts[k][2])) : null });
