@@ -213,6 +213,19 @@ smaller in-cell scale, wisps 2.2 -> 0.7, detail 2.6 -> 1.15). Two seams appeared
 sheet and detail cells now repeat mirrored (`cellM`), and a rotated puff is kept wholly inside its lattice cell
 (in-cell scale 0.56-0.78, offset limited to 0.5 - 0.62 x scale) so the cell boundary can no longer cut it.
 
+Round 16 (2026-11-15): the owner wants the blade to cut the smoke picture where it actually is — the two sides part,
+the picture ends up split and then slowly dissolves — instead of the whole mass moving together "like a sealed dome";
+and foreground smoke dense enough to hide part of the figure.
+
+- A push in `veil.wgsl` is now a line (`Splat.q` holds the end point and a split speed): smoke within the radius
+  is carried, pushed apart from the line to both sides, and thinned.
+- `main.js`: a blade meets each layer only at the point along its length whose view depth matches that layer
+  (weight falls off over 2.1 m of depth), as a short line 1.9 m long, radius 1.15 m during the snap, split 75,
+  density -45/s. As the stroke sweeps, that point travels across the layer and leaves a cut.
+  The earlier whole-blade push on every layer is what looked like a dome.
+- Near layers: more smoke, and it gathers up to 5-7 m altitude instead of 4.4 m, so it crosses the figure.
+  A first setting hid the figure completely and was eased by about a third.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

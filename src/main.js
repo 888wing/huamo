@@ -40,8 +40,8 @@ async function boot() {
   const enemy = new Enemy(), fx = [], splash = buildSplash(trail.scene);
   let dealt = 0, taken = 0, warded = 0;
   // five layers of smoke between 2.6 and 18 m from the camera; the first two lie between the camera and the figure
-  const veils = await Promise.all([[1.3, 2.0, 1, .5, 80], [2.0, 2.4, 1, .6, 75], [2.7, 2.7, 1, .7, 70], [3.4, 3.0, 1, .8, 65], [4.2, 3.2, 1, .9, 60], [5.2, 3.4, 1, 1.0, 55], [7.4, 3.4, .98, 1.1], [10, 3.8, .96, 1.2], [14, 4.2, .94, 1.25], [19, 4.6, .9, 1.25]]
-    .map(([d, k, tone, amount, turb = 36], i) => Veil.create(gpu, i, { d, k, tone, amount, turb }))); // the nearest is thin, restless wisps right in front of the lens
+  const veils = await Promise.all([[1.3, 2.2, 1, .55, 80, 7], [2.0, 2.6, 1, .68, 75, 7], [2.7, 3.0, 1, .8, 70, 6.5], [3.4, 3.2, 1, .9, 65, 6], [4.2, 3.4, 1, 1.0, 60, 5.5], [5.2, 3.6, 1, 1.1, 55, 5], [7.4, 3.4, .98, 1.1], [10, 3.8, .96, 1.2], [14, 4.2, .94, 1.25], [19, 4.6, .9, 1.25]]
+    .map(([d, k, tone, amount, turb = 36, top = 4.4], i) => Veil.create(gpu, i, { d, k, tone, amount, turb, top }))); // the near layers reach higher, so smoke can hide part of the figure // the nearest is thin, restless wisps right in front of the lens
   veils.forEach(v => { v.tex = external(v.A); v.disp = external(v.E0); });
   // the photographed smoke (12 pictures in one atlas) that gives the simulated layers their body and edges
   const bmp = await createImageBitmap(await (await fetch(atlasUrl)).blob());
@@ -156,9 +156,11 @@ async function boot() {
     camera.updateMatrixWorld();
     // ---- smoke layers: what moved this frame pushes each layer, more the closer its depth is to that layer's
     const stir = [{ p: [player.p[0], player.p[1] + 1, player.p[2]], v: player.v, r: 1.7, drag: 30, gain: 1.2 }];
-    if (bl) for (const k of [.15, .5, .85]) stir.push({ p: [0, 1, 2].map(a => bl.a[a] + (bl.b[a] - bl.a[a]) * k), v: bl.vel, r: bl.snap ? 3.4 : 1.6, drag: bl.snap ? 300 : 40, gain: 2.2, reach: 8 }); // smoke is far lighter than steel: the blade throws it
+    // the blade is a line, not a ball: it cuts the smoke only where it actually is, parts it to both sides and thins it along the cut
+    const edge = (b, snap) => ({ p: b.a, p2: [0, 1, 2].map(a => b.a[a] + (b.b[a] - b.a[a]) * 1.35), v: b.vel, r: snap ? 1.15 : .6, drag: snap ? 110 : 25, gain: 1.1, reach: 8, split: snap ? 75 : 8, den: snap ? -45 : -4 });
+    if (bl) stir.push(edge(bl, bl.snap));
     if (enemy.mode !== 'gone') stir.push({ p: [enemy.p[0], enemy.p[1] + 1, enemy.p[2]], v: enemy.v, r: 1.7, drag: 30, gain: 1.2 });
-    if (eb) for (const k of [.2, .8]) stir.push({ p: [0, 1, 2].map(a => eb.a[a] + (eb.b[a] - eb.a[a]) * k), v: eb.vel, r: 3, drag: 240, gain: 2, reach: 8 });
+    if (eb) stir.push(edge(eb, eb.snap));
     const e = camera.matrixWorld.elements, tanY = Math.tan(camera.fov * Math.PI / 360), focal = VH / (2 * tanY);
     camera.getWorldDirection(fwd);
     const camInfo = { y: camera.position.y, tanY, aspect: camera.aspect, fy: fwd.y, uy: e[5], ry: e[1] };
@@ -173,7 +175,15 @@ async function boot() {
           w = s.reach ? Math.min(1, Math.max(0, 1.4 - Math.abs(a[2] - v.d) / s.reach)) : Math.exp(-(((a[2] - v.d) / 4.2) ** 2));
         if (a[2] < .4 || w < .03) continue;
         const b = toLayer(s.p[0] + s.v[0] * .05, s.p[1] + s.v[1] * .05, s.p[2] + s.v[2] * .05);
-        splats.push({ x: a[0], y: a[1], r: s.r / a[2] * focal, w, vx: (b[0] - a[0]) / .05 * gn, vy: (b[1] - a[1]) / .05 * gn, den: 0, drag: s.drag });
+        const vx = (b[0] - a[0]) / .05 * gn, vy = (b[1] - a[1]) / .05 * gn;
+        if (s.p2) { // a blade meets this layer at one point along its length: that is where, and only where, this layer is cut
+          const a2 = toLayer(s.p2[0], s.p2[1], s.p2[2]), t = Math.min(1, Math.max(0, (v.d - a[2]) / ((a2[2] - a[2]) || 1e-3))), zc = a[2] + (a2[2] - a[2]) * t;
+          const wc = Math.exp(-(((v.d - zc) / 2.1) ** 2)), len = Math.hypot(a2[0] - a[0], a2[1] - a[1]) || 1, half = .95 / zc * focal;
+          const cx = a[0] + (a2[0] - a[0]) * t, cy = a[1] + (a2[1] - a[1]) * t, hx = (a2[0] - a[0]) / len * half, hy = (a2[1] - a[1]) / len * half;
+          if (wc > .03) splats.push({ x: cx - hx, y: cy - hy, x2: cx + hx, y2: cy + hy, r: s.r / zc * focal, w: wc, vx, vy, den: s.den, drag: s.drag, split: s.split / zc * focal });
+          continue;
+        }
+        splats.push({ x: a[0], y: a[1], r: s.r / a[2] * focal, w, vx, vy, den: 0, drag: s.drag });
       }
       v.step(vf, dt, t, [c[0] - VW / 2, c[1] - VH / 2], camInfo, splats);
     }

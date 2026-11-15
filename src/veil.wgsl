@@ -1,6 +1,8 @@
 // One layer of smoke: a 2D incompressible fluid on a plane that faces the camera at a fixed distance.
 // State texel: xy = velocity in texels per second, z = smoke density. Background is empty (density 0 = fully transparent).
-struct Splat { p: vec4f, v: vec4f } // p: centre xy (texels), radius, weight for this layer; v: velocity xy (texels/s), density per second, drag
+// A push is a line from p.xy to q.xy (a point when they coincide). p: start xy (texels), radius, weight for this layer;
+// v: velocity xy (texels/s), density per second, drag; q: end xy, speed at which smoke is pushed apart from the line (texels/s)
+struct Splat { p: vec4f, v: vec4f, q: vec4f }
 struct Params {
   a: vec4f, // width, height, dt, time
   b: vec4f, // scroll xy (texels: how far the camera's motion moved this layer on screen), amount of smoke, heal rate
@@ -53,7 +55,10 @@ fn at(t: texture_2d<f32>, p: vec2i) -> vec4f { return textureLoad(t, clamp(p, ve
   v += P_.g.x * d * dt * vec2f(cos(q.y * 2.3 + t * .7) + .6 * cos(q.y * 4.7 - t * 1.1 + q.x), -cos(q.x * 2.1 - t * .6) - .6 * cos(q.x * 4.3 + t * .9 + q.y));
   v.y -= P_.g.y * d * dt;
   for (var i = 0; i < i32(P_.g.z); i++) {
-    let e = P_.s[i]; let o = pos - e.p.xy; let k = max(0., 1. - length(o) / e.p.z) * e.p.w; // strongest at the centre, fading in a straight line to nothing at the edge
+    let e = P_.s[i]; let ba = e.q.xy - e.p.xy; let pa = pos - e.p.xy;
+    let o = pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0., 1.); let dist = length(o);
+    let k = max(0., 1. - dist / e.p.z) * e.p.w; // only what the line touches moves: strongest on it, fading in a straight line to nothing
+    v += o / max(dist, .5) * e.q.z * k * dt;    // and what it touches parts to either side
     v = mix(v, e.v.xy, clamp(k * e.v.w * dt, 0., 1.));
     d = max(0., d + e.v.z * k * dt);
   }
