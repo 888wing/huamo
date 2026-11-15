@@ -25,7 +25,7 @@ const wgsl = {
 
 const r = await build({
   entryPoints: [entry], bundle: true, format: 'iife', minify: !readable, target: 'es2022',
-  write: false, metafile: true, plugins: [wgsl], legalComments: 'none',
+  write: false, metafile: true, plugins: [wgsl], legalComments: 'none', loader: { '.jpg': 'dataurl' },
   define: { DEV: JSON.stringify(process.argv.includes('--dev')) },
 });
 const js = r.outputFiles[0].text;

@@ -5,10 +5,12 @@ import { Fn, vec2, vec3, vec4, float, uniform, texture, texture3D, screenUV, scr
   getViewPosition, perspectiveDepthToViewZ, interleavedGradientNoise, exp, max, min, length, mix, smoothstep, clamp, abs, floor, fract, dot } from 'three/tsl';
 import { PAPER, INK } from './stage.js';
 import { FOG_TOP } from './world.js';
+import { VW, VH } from './veil.js';
 
 const STEPS = 56, ZREF = 140;
 
-export function createFog(renderer, scene, camera, noise, den, strokes, vel, veils = []) {
+export function createFog(renderer, scene, camera, noise, den, strokes, vel, veils = [], atlas = null) {
+  veils.forEach((L, i) => { L.i = i; L.offU = uniform(new THREE.Vector2()); });
   const scenePass = pass(scene, camera), strokeT = pass(strokes, camera).getTextureNode('output');
   const colT = scenePass.getTextureNode('output'), depT = scenePass.getTextureNode('depth');
   // fog is thin veils, not a wall (kFog): the scene shows through and the fog's own movement becomes visible
@@ -122,17 +124,22 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
 
     // the smoke layers, far to near: each is laid over whatever lies beyond its distance, so smoke passes both behind
     // and in front of things. A second tap towards the light shades each layer: thick smoke up-light puts this texel in shadow.
+    // one cell of the smoke atlas, repeated: 0-5 puffs, 6-8 wisps, 9-10 sheets, 11 fine detail
+    const cell = (n, p) => texture(atlas, p.fract().mul(.96).add(.02).add(vec2(n % 4, Math.floor(n / 4))).div(vec2(4, 3))).level(0).r;
+    const asp2 = screenSize.x.div(screenSize.y);
     for (const L of [...veils].reverse()) {
+      const s = texture(L.tex, uv).level(0);
       const tap = o => texture(L.tex, uv.add(o)).level(0).z, e = .0045;
-      const d = tap(vec2(0, 0)).mul(.4).add(tap(vec2(e, 0)).add(tap(vec2(-e, 0))).add(tap(vec2(0, e * 1.8))).add(tap(vec2(0, -e * 1.8))).mul(.15)); // softened
-      const lit = tap(vec2(-.012, -.02));
-      // thin smoke barely shows and thick smoke never quite closes: edges are a long fade, not a line
-      // fine texture inside the smoke, dragged along by the layer's own flow
-      const dd = d.mul(texture3D(noise, vec3(uv.mul(vec2(2.6, 1.7)).add(texture(L.tex, uv).level(0).xy.mul(.0004)), L.d * .21)).level(0).r.mul(.8).add(.6)); // broad and soft: the noise texture is small, so it must not be magnified into flakes
-      const a0 = float(1).sub(exp(dd.mul(dd).div(dd.add(.18)).mul(-L.k))).mul(.94);
-      const a = a0.mul(smoothstep(L.d, L.d + 1.4, z));
-      // shade only where thicker smoke stands between this point and the light; edges get no brightening, so no ring forms around a puff
-      col.assign(mix(col, u.paper.mul(clamp(float(1.02).sub(max(lit.sub(d), 0).mul(.6)), .62, 1.02)).mul(L.tone), a));
+      const d = s.z.mul(.4).add(tap(vec2(e, 0)).add(tap(vec2(-e, 0))).add(tap(vec2(0, e * 1.8))).add(tap(vec2(0, -e * 1.8))).mul(.15));
+      // the photographs ride on the layer: attached to it, pulled along by its flow, drifting slowly
+      const p = uv.sub(L.offU).sub(s.xy.mul(.00022)).mul(vec2(asp2, 1)).add(vec2(L.i * .37, L.i * .61)).add(vec2(u.time.mul(.006), 0));
+      const body = cell(9 + L.i % 2, p.mul(.9)).mul(.55).add(cell(L.i % 6, p.mul(1.6).add(.3)).mul(.9)).add(cell(6 + L.i % 3, p.mul(2.3)).mul(.5));
+      const fine = cell(11, p.mul(2.6));
+      // the simulation says where the smoke is; the photographs give it body, and their fine detail eats into its edges
+      const dd = max(d.mul(body.mul(1.5).add(.3)).sub(fine.oneMinus().mul(.22).mul(max(d.oneMinus(), 0))), 0);
+      const a = float(1).sub(exp(dd.mul(dd).div(dd.add(.15)).mul(-L.k))).mul(.95).mul(smoothstep(L.d, L.d + 1.4, z));
+      const shade = clamp(float(.78).add(body.mul(.3)).sub(max(tap(vec2(-.012, -.02)).sub(d), 0).mul(.5)), .6, 1.04);
+      col.assign(mix(col, u.paper.mul(shade).mul(L.tone), a));
     }
 
     // the sword stroke goes on last, over the fog
@@ -164,6 +171,7 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
   return {
     u,
     use(name) { pipeline.outputNode = name === 'slice' ? slice : final; pipeline.needsUpdate = true; },
-    render() { u.camPos.value.setFromMatrixPosition(camera.matrixWorld); u.dpr.value = renderer.getPixelRatio(); pipeline.render(); },
+    render() { for (const L of veils) L.offU.value.set(L.off[0] / VW, L.off[1] / VH);
+      u.camPos.value.setFromMatrixPosition(camera.matrixWorld); u.dpr.value = renderer.getPixelRatio(); pipeline.render(); },
   };
 }

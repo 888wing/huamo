@@ -167,6 +167,24 @@ and a stroke seems to move only one layer: make it move a band of depth around i
 Whole frame on the M4 with eight layers: 8.1 ms at 720p, 11.5 ms at 1080p (simulation 4.0 ms). Checked from two
 stills and an error-free scripted fight; motion not judged frame by frame. Live at https://888wing.github.io/huamo/.
 
+## Rounds 12-13 (2026-11-15): ten layers, then photographed smoke
+
+Owner: the fluid motion now feels right; the smoke's edge texture does not. They asked whether supplied textures
+would help, then generated 12 greyscale smoke photographs to my spec (`assets/smoke/`: 6 puffs, 3 wisps, 2 sheets,
+1 fine detail; 1024 px, black background). They want realistic smoke, not ink-wash smoke.
+
+- Ten layers (six between camera and figure, more restless the nearer). The bright ring at puff edges and the
+  edge-strand noise (which showed as flakes once layers stacked) were removed.
+- `tools/atlas.sh` packs the 12 pictures into `assets/smoke_atlas.jpg` (4 x 3 cells of 512 px, 125 KB), which the
+  build embeds as a data URL (`loader: { '.jpg': 'dataurl' }` in `build.mjs`).
+- `fog.js`: each layer's simulated density is multiplied by photographed smoke (a sheet, a puff and a wisp cell,
+  different per layer) and eroded at its edges by the fine-detail cell. The photographs are attached to the layer
+  (`off` scroll), pulled by the layer's velocity, and drift slowly. The simulation decides where smoke is and how
+  it moves; the photographs decide what it looks like.
+
+`dist/index.html`: 1046.6 KB raw, **347.6 KB gzip** (+98 KB for the atlas). Stills show real billowing puffs with
+wispy edges. Known: the puff cells repeat in a visible grid in places. Motion not judged frame by frame.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

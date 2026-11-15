@@ -9,6 +9,7 @@ import { createFog } from './fog.js';
 import { Player, Enemy, spar, FORMS, HP } from './player.js';
 import { Figure } from './figure.js';
 import { Veil, VW, VH } from './veil.js';
+import atlasUrl from '../assets/smoke_atlas.jpg';
 import { DEMOS } from './demos.js';
 
 const q = new URLSearchParams(location.search);
@@ -42,7 +43,11 @@ async function boot() {
   const veils = await Promise.all([[1.3, 2.0, 1, .5, 80], [2.0, 2.4, 1, .6, 75], [2.7, 2.7, 1, .7, 70], [3.4, 3.0, 1, .8, 65], [4.2, 3.2, 1, .9, 60], [5.2, 3.4, 1, 1.0, 55], [7.4, 3.4, .98, 1.1], [10, 3.8, .96, 1.2], [14, 4.2, .94, 1.25], [19, 4.6, .9, 1.25]]
     .map(([d, k, tone, amount, turb = 36], i) => Veil.create(gpu, i, { d, k, tone, amount, turb }))); // the nearest is thin, restless wisps right in front of the lens
   veils.forEach(v => { v.tex = external(v.A); });
-  const fog = createFog(renderer, scene, camera, noise, external(sim.D0), trail.scene, external(sim.V0), veils);
+  // the photographed smoke (12 pictures in one atlas) that gives the simulated layers their body and edges
+  const bmp = await createImageBitmap(await (await fetch(atlasUrl)).blob());
+  const atlasTex = gpu.tex([bmp.width, bmp.height], 'rgba8unorm', GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT);
+  device.queue.copyExternalImageToTexture({ source: bmp }, { texture: atlasTex }, [bmp.width, bmp.height]);
+  const fog = createFog(renderer, scene, camera, noise, external(sim.D0), trail.scene, external(sim.V0), veils, external(atlasTex));
   const prevPos = new THREE.Vector3(), prevFwd = new THREE.Vector3(0, 0, -1), tv = new THREE.Vector3(), fwd = new THREE.Vector3();
   // world point -> [x, y] in layer texels and distance along the view
   const toLayer = (x, y, z) => { tv.set(x, y, z).applyMatrix4(camera.matrixWorldInverse); const dist = -tv.z; tv.applyMatrix4(camera.projectionMatrix); return [(tv.x * .5 + .5) * VW, (1 - (tv.y * .5 + .5)) * VH, dist]; };
