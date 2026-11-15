@@ -152,6 +152,21 @@ second tap towards the light for shading. The blade emits no ink.
 The 3D solver still runs underneath as a thin ground mist. Stills of `?demo=slash` show soft white billows in front
 of and behind the figure. Whether a stroke visibly parts them was not judged in motion.
 
+## Rounds 10-11 (2026-11-15): bolder, then softer, eight layers
+
+Owner on round 9: direction finally right (smoke is being parted), but be much bolder: denser, far stronger push,
+linear falloff. Then: edges too hard for smoke (want a long fade and strands drifting in front), try more layers,
+and a stroke seems to move only one layer: make it move a band of depth around it regardless of exact position.
+
+- Push: linear falloff in the splat (`veil.wgsl`); blade radius 3.4 m, drag 300, velocity gain 2.2; bodies 1.7 m.
+- Blades use `reach: 8`: every layer within about 8 m of the blade's depth gets (nearly) the full push.
+- Eight layers at 1.6, 2.7, 3.9, 5.2, 7.4, 10, 14, 19 m; the nearest is thin restless wisps.
+- Soft edges: density diffuses slightly each step; the composite blurs each layer with 5 taps, uses a long-toe
+  opacity curve capped at 0.94, and breaks the fading edge into drifting strands with noise.
+
+Whole frame on the M4 with eight layers: 8.1 ms at 720p, 11.5 ms at 1080p (simulation 4.0 ms). Checked from two
+stills and an error-free scripted fight; motion not judged frame by frame. Live at https://888wing.github.io/huamo/.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

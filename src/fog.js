@@ -123,9 +123,15 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     // the smoke layers, far to near: each is laid over whatever lies beyond its distance, so smoke passes both behind
     // and in front of things. A second tap towards the light shades each layer: thick smoke up-light puts this texel in shadow.
     for (const L of [...veils].reverse()) {
-      const s = texture(L.tex, uv).level(0), lit = texture(L.tex, uv.add(vec2(-.012, -.02))).level(0);
-      const a = float(1).sub(exp(s.z.mul(-L.k))).mul(smoothstep(L.d, L.d + 1.4, z));
-      col.assign(mix(col, u.paper.mul(clamp(float(1.04).sub(lit.z.sub(s.z.mul(.6)).mul(.8)), .52, 1.06)).mul(L.tone), a));
+      const tap = o => texture(L.tex, uv.add(o)).level(0).z, e = .0045;
+      const d = tap(vec2(0, 0)).mul(.4).add(tap(vec2(e, 0)).add(tap(vec2(-e, 0))).add(tap(vec2(0, e * 1.8))).add(tap(vec2(0, -e * 1.8))).mul(.15)); // softened
+      const lit = tap(vec2(-.012, -.02));
+      // thin smoke barely shows and thick smoke never quite closes: edges are a long fade, not a line
+      const a0 = float(1).sub(exp(d.mul(d).div(d.add(.18)).mul(-L.k))).mul(.94);
+      // and along that fade the smoke breaks into drifting strands
+      const strand = texture3D(noise, vec3(uv.x.mul(5).add(L.d * .37), uv.y.mul(11).sub(u.time.mul(.03)), L.d * .13 + .2).add(vec3(d.mul(.6), 0, u.time.mul(.011)))).level(0).b;
+      const a = a0.mul(mix(1, smoothstep(.2, .75, strand), a0.oneMinus().mul(a0).mul(3.2))).mul(smoothstep(L.d, L.d + 1.4, z));
+      col.assign(mix(col, u.paper.mul(clamp(float(1.04).sub(lit.sub(d.mul(.6)).mul(.8)), .52, 1.06)).mul(L.tone), a));
     }
 
     // the sword stroke goes on last, over the fog

@@ -25,7 +25,9 @@ fn at(t: texture_2d<f32>, p: vec2i) -> vec4f { return textureLoad(t, clamp(p, ve
   let dt = P_.a.z; let t = P_.a.w; let pos = vec2f(id) + .5;
   let here = textureLoad(aI, id, 0);
   let s = textureSampleLevel(aI, smp, (pos - here.xy * dt - P_.b.xy) / size, 0.);
-  var v = s.xy; var d = s.z;
+  var v = s.xy;
+  // smoke spreads a little every step, so its edges stay soft instead of hardening into outlines
+  var d = mix(s.z, .25 * (at(aI, id + vec2i(2, 0)).z + at(aI, id - vec2i(2, 0)).z + at(aI, id + vec2i(0, 2)).z + at(aI, id - vec2i(0, 2)).z), .1);
   // where this texel is in the world: smoke gathers below a certain altitude, in drifting patches
   let ndc = pos / size * 2. - 1.;
   let y = P_.c.x + P_.c.y * (P_.f.x + ndc.x * P_.c.z * P_.c.w * P_.f.z - ndc.y * P_.c.z * P_.f.y);

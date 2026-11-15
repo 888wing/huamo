@@ -39,7 +39,8 @@ async function boot() {
   const enemy = new Enemy(), fx = [], splash = buildSplash(trail.scene);
   let dealt = 0, taken = 0, warded = 0;
   // five layers of smoke between 2.6 and 18 m from the camera; the first two lie between the camera and the figure
-  const veils = await Promise.all([[2.6, 2.4, 1, .65], [4.6, 3.0, 1, .85], [8, 3.8, .98, 1.15], [12, 4.4, .95, 1.25], [18, 4.8, .91, 1.25]].map(([d, k, tone, amount], i) => Veil.create(gpu, i, { d, k, tone, amount })));
+  const veils = await Promise.all([[1.6, 1.6, 1, .35, 60], [2.7, 2.2, 1, .6], [3.9, 2.6, 1, .75], [5.2, 2.8, 1, .85], [7.4, 3.4, .98, 1.1], [10, 3.8, .96, 1.2], [14, 4.2, .94, 1.25], [19, 4.6, .9, 1.25]]
+    .map(([d, k, tone, amount, turb = 36], i) => Veil.create(gpu, i, { d, k, tone, amount, turb }))); // the nearest is thin, restless wisps right in front of the lens
   veils.forEach(v => { v.tex = external(v.A); });
   const fog = createFog(renderer, scene, camera, noise, external(sim.D0), trail.scene, external(sim.V0), veils);
   const prevPos = new THREE.Vector3(), prevFwd = new THREE.Vector3(0, 0, -1), tv = new THREE.Vector3(), fwd = new THREE.Vector3();
@@ -150,9 +151,9 @@ async function boot() {
     camera.updateMatrixWorld();
     // ---- smoke layers: what moved this frame pushes each layer, more the closer its depth is to that layer's
     const stir = [{ p: [player.p[0], player.p[1] + 1, player.p[2]], v: player.v, r: 1.7, drag: 30, gain: 1.2 }];
-    if (bl) for (const k of [.15, .5, .85]) stir.push({ p: [0, 1, 2].map(a => bl.a[a] + (bl.b[a] - bl.a[a]) * k), v: bl.vel, r: bl.snap ? 3.4 : 1.6, drag: bl.snap ? 260 : 40, gain: 1.9 }); // smoke is far lighter than steel: the blade throws it
+    if (bl) for (const k of [.15, .5, .85]) stir.push({ p: [0, 1, 2].map(a => bl.a[a] + (bl.b[a] - bl.a[a]) * k), v: bl.vel, r: bl.snap ? 3.4 : 1.6, drag: bl.snap ? 300 : 40, gain: 2.2, reach: 8 }); // smoke is far lighter than steel: the blade throws it
     if (enemy.mode !== 'gone') stir.push({ p: [enemy.p[0], enemy.p[1] + 1, enemy.p[2]], v: enemy.v, r: 1.7, drag: 30, gain: 1.2 });
-    if (eb) for (const k of [.2, .8]) stir.push({ p: [0, 1, 2].map(a => eb.a[a] + (eb.b[a] - eb.a[a]) * k), v: eb.vel, r: 3, drag: 220, gain: 1.8 });
+    if (eb) for (const k of [.2, .8]) stir.push({ p: [0, 1, 2].map(a => eb.a[a] + (eb.b[a] - eb.a[a]) * k), v: eb.vel, r: 3, drag: 240, gain: 2, reach: 8 });
     const e = camera.matrixWorld.elements, tanY = Math.tan(camera.fov * Math.PI / 360), focal = VH / (2 * tanY);
     camera.getWorldDirection(fwd);
     const camInfo = { y: camera.position.y, tanY, aspect: camera.aspect, fy: fwd.y, uy: e[5], ry: e[1] };
@@ -162,7 +163,9 @@ async function boot() {
       const c = toLayer(prevPos.x + prevFwd.x * v.d, prevPos.y + prevFwd.y * v.d, prevPos.z + prevFwd.z * v.d); // where last frame's centre is now
       const splats = [];
       for (const s of stir) {
-        const a = toLayer(s.p[0], s.p[1], s.p[2]), w = Math.exp(-(((a[2] - v.d) / 4.2) ** 2)), gn = s.gain ?? 1;
+        const a = toLayer(s.p[0], s.p[1], s.p[2]), gn = s.gain ?? 1,
+          // a stroke moves every layer within a band of depth around it, not just the one it happens to be in
+          w = s.reach ? Math.min(1, Math.max(0, 1.4 - Math.abs(a[2] - v.d) / s.reach)) : Math.exp(-(((a[2] - v.d) / 4.2) ** 2));
         if (a[2] < .4 || w < .03) continue;
         const b = toLayer(s.p[0] + s.v[0] * .05, s.p[1] + s.v[1] * .05, s.p[2] + s.v[2] * .05);
         splats.push({ x: a[0], y: a[1], r: s.r / a[2] * focal, w, vx: (b[0] - a[0]) / .05 * gn, vy: (b[1] - a[1]) / .05 * gn, den: 0, drag: s.drag });
