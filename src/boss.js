@@ -61,7 +61,8 @@ export class Giant {
       this.side = off > 0 ? 1 : -1; const a = this.yaw + this.side * .32, x = p[0] + Math.sin(a) * 5, z = p[2] + Math.cos(a) * 5; this.target = [x, height(x, z), z];
       ev.push({ kind: 'fell', at: [...p] });
     }
-    if (this.mode === 'sleep') { if (ready && arenaDist(pl.p[0], pl.p[2]) < SEAL - .4) { this.go('rise'); ev.push({ kind: 'wake', at: [...p] }); } }
+    // (it wakes once someone is well inside the curtain: the walk in through it is staged by whoever draws the picture)
+    if (this.mode === 'sleep') { if (ready && (this.woken || arenaDist(pl.p[0], pl.p[2]) < SEAL - 2.6)) { this.go('rise'); ev.push({ kind: 'wake', at: [...p] }); } }
     else if (this.mode === 'fell') { // on one hand, heaving, for whatever ends it
       const k = c / .6; this.fall = cl(k) ** 2; this.down = this.fall; this.ik = cl(k * 2.5); this.fast = k < 2.5; this.glow = .35 + .25 * Math.sin(this.time * 7);
       if (k >= 1 && !this.done) { this.done = true; ev.push({ kind: 'slam', at: [...this.target] }); }

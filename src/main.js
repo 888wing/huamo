@@ -30,7 +30,14 @@ async function boot() {
 
   const renderer = new THREE.WebGPURenderer({ device, antialias: false });
   await renderer.init();
-  renderer.setPixelRatio(Math.min(devicePixelRatio, +(q.get('dpr') ?? 1.5)));
+  // The picture's resolution gives way before the frame rate does. It starts at what 1.8 million pixels allow (a 1080p
+  // picture costs 11 ms on an M4 and more when a stamp throws ink about; the 2.9 million of a laptop window at 1.5x cost
+  // 16 ms, the whole of a 60 Hz frame), drops a notch when frames keep arriving late, and comes back a notch at a time
+  // after a long clean run, never past where it started. ?dpr= fixes it.
+  const NOTCH = [1.5, 1.25, 1.1, 1, .85, .75], fixedRatio = q.has('dpr') || q.has('manual');
+  const fitRatio = () => { const lim = Math.min(devicePixelRatio, 1.5, Math.sqrt(1.8e6 / (innerWidth * innerHeight))); return NOTCH.find(r => r <= lim + 1e-3) ?? .75; };
+  let ratio = fixedRatio ? Math.min(devicePixelRatio, +(q.get('dpr') ?? 1.5)) : fitRatio(), ratioTop = ratio;
+  renderer.setPixelRatio(ratio);
   renderer.setSize(innerWidth, innerHeight);
   document.body.prepend(renderer.domElement);
   const scene = new THREE.Scene();
@@ -97,7 +104,7 @@ async function boot() {
   fog.u.boxSize.value.set(n[0] * h, n[1] * h, n[2] * h); fog.u.top.value = sim.org[1] + n[1] * h;
   let view = q.get('view') ?? 'fog';
   fog.use(view);
-  addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+  addEventListener('resize', () => { if (!fixedRatio) { ratio = ratioTop = fitRatio(); renderer.setPixelRatio(ratio); } renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 
   // ---- input
   const player = new Player(); player.foe = enemy; player.boss = giant;
@@ -111,11 +118,11 @@ async function boot() {
   }
   const sound = createSound(q.has('mute')); // made in code; starts with the first key or click, M mutes
   const keys = new Set();
-  let anyKey = false, ended = false, actHeld = false, guardHeld = false, dodgeNow = false, drawer = false, timing = q.has('timing'), ms = null, probeText = '';
+  let skipKey = false, ended = false, actHeld = false, guardHeld = false, dodgeNow = false, drawer = false, timing = q.has('timing'), ms = null, probeText = '';
   addEventListener('keydown', e => {
     if (e.code === 'Tab') { e.preventDefault(); drawer = !drawer; }
     if (e.repeat) return;
-    anyKey = true; if (e.code === 'KeyR' && ended) location.reload();
+    if (['Space', 'Enter', 'Escape', 'KeyF'].includes(e.code)) skipKey = true; if (e.code === 'KeyR' && ended) location.reload();
     if (e.code === 'KeyM') sound.toggle();
     keys.add(e.code);
     if (e.code === 'ShiftLeft') dodgeNow = true;
@@ -179,6 +186,7 @@ async function boot() {
     `<div style="text-align:center;font:900 11.5vh/1.05 ${SERIF};letter-spacing:.7em;text-indent:.7em"><div style="font:600 2.3vh/1.6 ${SERIF};letter-spacing:.5em;text-indent:.5em;opacity:.75"></div><span></span></div>`);
   let bandT = -1, bandKind = '';
   const bandShow = (kind, small, big, color) => { bandKind = kind; bandT = 0; band.firstChild.style.color = color; band.firstChild.firstChild.textContent = small; band.firstChild.lastChild.textContent = big; };
+  const skipHint = mk(`position:fixed;left:50%;bottom:3.6vh;transform:translateX(-50%);font:600 14px/1 ${SERIF};color:#ece6d8;letter-spacing:.3em;pointer-events:none;opacity:0`, '空白　跳過');
   const again = mk(`position:fixed;left:50%;bottom:26px;transform:translateX(-50%);font:600 15px/1 ${SERIF};color:#121419;letter-spacing:.2em;pointer-events:none;opacity:0;text-shadow:0 0 5px #ece6d8`, '按 R 再來一次');
   const stamps = [];
   const stamp = (text, at, size = 1, red = false) => {
@@ -201,17 +209,27 @@ async function boot() {
   let camReady = false, rideWas = false, rideSet = false, rideAz = 0, rideTo = 0;
   let curtainK = 1, curtainOpen = 1, curtainSee = 1;
 
-  function tick() {
+  function tick(draw = true) {
     // a blow that lands stops time for a few frames: that pause is where the weight is felt
     const dt = hold > 0 ? (hold--, DT * .05) : slowT > 0 ? (slowT -= DT, DT * .35) : DT; sim.par.dt = dt; clock += dt;
     const t = clock;
     if (demo) demo(t, player, cam, override);
     const beforeX = player.p[0], beforeZ = player.p[2];
-    // a staged moment (the giant's entrance, the kill) runs on real time; the entrance can be skipped with any key
-    if (cine) { cine.t += DT; if (cine.t >= cine.dur || (anyKey && cine.kind === 'entrance' && cine.t > .5)) { if (cine.kind === 'kill') cam.yaw = Math.atan2(tgt.x - eye.x, tgt.z - eye.z); cine = null; show(false); } }
-    anyKey = false; player.staged = cine?.kind === 'entrance';
-    const held = player.staged ? { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false } : demo ? override : input();
-    player.update(dt, held, cam, enemy.alive ? enemy.p : giant.aim(player.p));
+    // The curtain is a threshold. Whoever comes to it while the giant sleeps is taken through it: control is set aside
+    // for the second it takes, the fog is blown open where they pass, and any shadow still about is left outside.
+    const edge = arenaDist(player.p[0], player.p[2]);
+    if (!cine && !giant.awake && giant.alive && player.fallen <= 0 && edge < SEAL + .3 && edge > SEAL - 2.4) {
+      const c = [...player.p], at = [player.p[0], player.p[1] + 1.2, player.p[2]]; arenaKeep(c, 0);   // (c: the nearest point of the clearing's middle line)
+      cine = { kind: 'gate', t: 0, dur: 2.4, yaw: Math.atan2(c[0] - player.p[0], c[2] - player.p[2]) }; show(true);
+      if (enemy.mode !== 'done') { enemy.n = enemy.total; enemy.spawn(); }
+      blasts.push({ p: at, r: 7, split: 260, den: -30, life: .9, t: 0 }); fx.push({ a: at, r: 3, ink: 0, div: 26, life: .35, t: 0 });
+      shake = Math.max(shake, .7); flash = Math.max(flash, .1); sound.play('shift'); sound.play('rumble');
+    }
+    // a staged moment (the walk in, the giant's entrance, the kill) runs on real time; the entrance can be skipped, with space, enter, escape or attack
+    if (cine) { cine.t += DT; if (cine.t >= cine.dur || (skipKey && cine.kind === 'entrance' && cine.t > 1)) { if (cine.kind === 'gate') giant.woken = true; if (cine.kind === 'kill') cam.yaw = Math.atan2(tgt.x - eye.x, tgt.z - eye.z); cine = null; show(false); } }
+    skipKey = false; const walkIn = cine?.kind === 'gate'; player.staged = cine?.kind === 'entrance' || walkIn;
+    const held = player.staged ? { x: 0, z: walkIn ? .6 : 0, up: 0, down: 0, act: false, guard: false, dodge: false } : demo ? override : input();
+    player.update(dt, held, walkIn ? { yaw: cine.yaw, pitch: 0 } : cam, enemy.alive ? enemy.p : giant.aim(player.p));
     // the giant's bulk: a body in the air cannot pass through it
     if (giant.awake && giant.alive && !player.ride && player.fallen <= 0) arenaKeep(player.p);   // the curtain lets no one out while the bout lasts
     if (!player.ride && player.plunge !== 1 && !(player.fin && player.form === 3)) for (const [x, y, z, r] of giant.volumes()) {
@@ -262,15 +280,15 @@ async function boot() {
       shake = Math.max(shake, .31);
     }
     // the giant: every stamp and blow shakes the picture, throws ink up and blows the fog and the smoke open
-    const gev = giant.update(dt, player, enemy.mode === 'done'), cut = giant.struck(player); if (cut) gev.push(cut);
+    const gev = giant.update(dt, player, true), cut = giant.struck(player); if (cut) gev.push(cut);
     for (const ev of gev) {
       const [sh, fl, kk, hd, r, div, n, size] = { sweep: [1.2, .1, .4, 0, 3, 20, 0, 1], charge: [1.6, .12, .5, 0, 4, 26, 0, 1], gate: [.6, .1, .3, 0, 3, 30, 0, 1], topple: [3.6, .5, 1, 10, 6, 70, 150, 1.3], dead: [0, 0, 0, 0, 1, 0, 0, 1], fell: [2.2, .6, .8, 12, 5, 40, 120, 1.2], rage: [2.4, .45, .8, 9, 6, 60, 0, 1], wake: [.9, 0, 0, 0, 3, 16, 0, 1], roar: [1.7, .2, .5, 0, 4.5, 34, 0, 1], step: [.8, 0, .2, 0, 2.6, 16, 20, 1], stomp: [2.8, .3, .9, 8, 5, 55, 90, 1.15], slam: [3.2, .55, 1, 11, 4.5, 60, 100, 1.15], struck: [1.3, .3, .5, 6, 2, 18, 50, 1], cut: [.9, .22, .4, 5, 2, 16, ev.big ? 70 : 34, 1.4] }[ev.kind];
       shake = Math.max(shake, sh); flash = Math.max(flash, fl); kick = Math.max(kick, kk); hold = Math.max(hold, hd);
-      sound.play({ wake: 'rumble', roar: 'groar', step: 'gstep', stomp: 'stomp', slam: 'slam', sweep: 'sweep', charge: 'sweep', struck: 'hurt', cut: 'cut', topple: 'slam', gate: 'splash', rage: 'groar', fell: 'kill' }[ev.kind]);
+      sound.play({ roar: 'groar', step: 'gstep', stomp: 'stomp', slam: 'slam', sweep: 'sweep', charge: 'sweep', struck: 'hurt', cut: 'cut', topple: 'slam', gate: 'splash', rage: 'groar', fell: 'kill' }[ev.kind]);
       fx.push({ a: ev.at, r, ink: 0, div, life: .3, t: 0 });
       if (n) splash.burst(ev.at, ev.dir ?? [0, 0], n, size);
       if (sh > 1.5) blasts.push({ p: [ev.at[0], ev.at[1] + (ev.kind === 'roar' ? 0 : 1.2), ev.at[2]], r: ev.kind === 'roar' ? 8 : 11, split: 300, den: ev.kind === 'roar' ? -12 : -40, life: .7, t: 0 });
-      if (ev.kind === 'wake') { player.home = [-1, -6]; sound.play('clacks'); if (!q.has('nocine') && !cam.fixed) { cine = { kind: 'entrance', t: 0, dur: 5.6, eye0: eye.clone(), tgt0: tgt.clone(), named: false }; show(true); } }
+      if (ev.kind === 'wake') { player.home = [-1, -6]; sound.play('clacks'); if (cine?.kind === 'gate') cine = null; if (!q.has('nocine') && !cam.fixed) { cine = { kind: 'entrance', t: 0, dur: 5.6, eye0: eye.clone(), tgt0: tgt.clone(), named: false }; show(true); } }
       // heavy blows are drawn as well as felt: lines thrown out from where they land, a frame turned inside out, a character stamped on the picture
       if (ev.kind === 'stomp' || ev.kind === 'slam' || ev.kind === 'topple') { burstK = 1; burstAt = ev.at; invertN = 2; stamp(ev.kind === 'slam' ? '砰' : '轟', [ev.at[0], ev.at[1] + 1.2, ev.at[2]], ev.kind === 'topple' ? 1.3 : 1); }
       if (ev.kind === 'sweep' || ev.kind === 'charge') { burstK = .7; burstAt = ev.at; }
@@ -532,15 +550,15 @@ async function boot() {
     const showOpponent = enemy.mode === 'done' ? giantShown : enemy.mode === 'fall' || enemy.mode === 'gone' || enemy.mode === 'reel'
       ? 1 : enemy.alive && nearOpponent ? .35 : 0;
     enemyClear.value += (showOpponent - enemyClear.value) * (1 - Math.exp(-(showOpponent > enemyClear.value ? 18 : 4) * dt));
-    fog.render();
+    if (draw) fog.render();
     frame++;
 
-    const now = performance.now(); fps += (1000 / Math.max(now - last, 1) - fps) * .05; last = now;
+    if (draw) { const now = performance.now(); fps += (1000 / Math.max(now - last, 1) - fps) * .05; last = now; }
     if (frame % 10 === 0) {
       const tot = ms ? Object.values(ms).reduce((a, b) => a + b, 0) : 0;
       const pips = (n, of) => '●'.repeat(Math.max(0, n)) + '○'.repeat(of - Math.max(0, n));
       const move = f === 0 && act >= 0 ? `  ${['橫斬', '挑斬', '下劈'][player.combo ?? 0]}` : '';
-      let s = `${FORMS[f]}${move}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? Math.ceil(enemy.hp) : 0, enemy.maxHp ?? 6)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? `  巨相撲鬼 ${giant.hp}/${giant.hpMax}` : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
+      let s = `${FORMS[f]}${move}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? Math.ceil(enemy.hp) : 0, enemy.maxHp ?? 6)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? `  巨相撲鬼 ${giant.hp}/${giant.hpMax}` : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps ×${ratio}${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
       if (drawer) {
         s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（不按方向＝後跳，按方向＝翻滾；鶴鯉為下降）\n空中按出招＝下突刺 · 閃避尾段按出招＝衝斬 · 被擊飛時按空白＝受身\n化獸（共用下方的墨）：跳躍中再按空白＝鶴 · 閃避中再按 Shift＝虎 · 連按兩下格擋＝鯉 · 化獸時按出招＝變回並出招，格擋鍵＝獸的本招\n巨相撲鬼：穿過霧幕開戰，打完之前出不去 · 斬腳踝扣血，手掌貼地時斬扣雙倍 · 四股的震波和橫掃要跳過，巨掌落下前滾開 · 血量過半它會發怒變快 · 從高處下突刺中頭頂是重擊 · 血量歸零後由一種獸收尾\nM 靜音 · V 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
         if (ms) s += '\n\n' + Object.entries(ms).map(([k, v]) => `${k.padEnd(18)}${v.toFixed(2)} ms`).join('\n');
@@ -555,6 +573,7 @@ async function boot() {
       bossBar.style.opacity = bossK.toFixed(3); const sh = giant.hitT > .25 ? (frame % 2 ? 3 : -3) : 0; bossBar.style.transform = `translateX(-50%) translate(${sh}px, 0)`;
       bossNow.setAttribute('stroke-dasharray', `${Math.max(hpK * bossFill, .0001)} 1`); bossNow.setAttribute('stroke-opacity', hpK <= 0 ? 0 : 1);
       bossLag.setAttribute('stroke-dasharray', `${Math.max(bossLagV * bossFill, .0001)} 1`); bossLag.setAttribute('stroke-opacity', bossLagV <= .001 ? 0 : .5);
+      skipHint.style.opacity = cine?.kind === 'entrance' && cine.t > 1 && cine.t < 4.4 ? .55 : 0;
       // the band: in, held, out
       if (bandT >= 0) { bandT += DT; const [a, b, c] = bandKind === 'won' ? [1.2, 4.6, 6.2] : [.9, 2.3, 3.3], k = sm(bandT, .0, a) * (1 - sm(bandT, b, c)); band.style.opacity = k.toFixed(3); band.firstChild.style.transform = `scale(${1 + .06 * bandT / c})`; if (bandT > c) bandT = -1; }
       // the curtain: all the way round until someone walks in, near them only while the bout lasts, lifting when it is over
@@ -579,13 +598,36 @@ async function boot() {
   window.__bench = async k => { const t0 = performance.now(); for (let i = 0; i < k; i++) { tick(); await device.queue.onSubmittedWorkDone(); } return (performance.now() - t0) / k; };
   window.__state = () => ({ frame, ms, clock, hold, p: player.p, form: player.form, hp: player.hp, combo: player.combo,
     attack: player.actT, dealt, taken, warded, foe: enemy.mode, enemyHp: enemy.hp, enemyIndex: enemy.n, fall: enemy.fallT, melt: enemy.meltT,
-    sound: sound.on, step: player.demoStep, pinned: !!giant.pinned, ride: player.ride?.kind ?? null, stab: player.ride?.stab ?? null, raise: player.raise, bossHp: giant.hp, bossMax: giant.hpMax, phase: giant.phase, fin: player.fin?.kind ?? null, band: bandT >= 0 ? bandKind : null, bossDeath: giant.death, cine: cine?.kind ?? null, ended, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
+    sound: sound.on, ratio, step: player.demoStep, pinned: !!giant.pinned, ride: player.ride?.kind ?? null, stab: player.ride?.stab ?? null, raise: player.raise, bossHp: giant.hp, bossMax: giant.hpMax, phase: giant.phase, fin: player.fin?.kind ?? null, band: bandT >= 0 ? bandKind : null, bossDeath: giant.death, cine: cine?.kind ?? null, ended, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
     hero: { ik: hero.ikW, feet: hero.feet.map(f => { const b = hero.B['foot' + f.k].getWorldPosition(tv); return { planted: f.t >= 1, x: b.x, y: b.y, z: b.z }; }) },
     boss: giant.mode, parts: giant.parts, target: giant.target, planted: giant.planted && giant.fall >= 1 && giant.ik >= 1, side: giant.side,
     foot: giant.parts ? ['footL', 'footR'].map(k => giant.parts[k][1] - height(giant.parts[k][0], giant.parts[k][2])) : null });
-  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
+  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; } if (o.ratio) { ratio = o.ratio; renderer.setPixelRatio(ratio); } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
   if (q.has('manual')) { tick(); window.__done = true; return; }
-  renderer.setAnimationLoop(tick);
+  // The game advances in steps of 1/60 s; a display need not call at that rate. A 120 Hz one calls twice as often, a
+  // heavy picture less often. So the time that has really passed is banked and spent in whole steps: none on a call that
+  // comes too soon, two (the first without drawing) on one that comes late, and never more, so a stall is not chased.
+  // Before this, every frame was one step: half speed at 30 fps, double on a fast display, uneven in between.
+  let bank = 0, before = 0, calls = 0, lateCalls = 0, clean = 0, settle = 3, raised = 99;
+  renderer.setAnimationLoop(now => {
+    const el = before ? Math.min(.1, (now - before) / 1000) : DT; before = now; bank += el;
+    const steps = Math.min(2, Math.floor(bank / DT + .12)); if (!steps) return;
+    bank = Math.max(-.25 * DT, bank - steps * DT); if (bank > DT) bank = 0;
+    if (Math.abs(bank) < .5 * DT) bank *= .9;   // (a display a hair off 60 Hz is followed frame for frame: a thousandth of speed, not a doubled step every few seconds)
+    for (let i = 0; i < steps; i++) tick(i === steps - 1);
+    if (fixedRatio) return;
+    // Late more than one call in six, over a second and a half of play: a notch less resolution. (Staged moments are not
+    // counted: they are short, close and heavy.) After twenty clean seconds it comes back a notch; if that notch fails
+    // again within a quarter of a minute it is not tried a third time.
+    raised += steps * DT; if (cine || (settle -= steps * DT) > 0) return;
+    calls++; if (steps > 1) lateCalls++;
+    if (calls < 90) return;
+    const i = NOTCH.indexOf(ratio);
+    if (lateCalls > 15 && i >= 0 && i < NOTCH.length - 1) { if (raised < 15) ratioTop = NOTCH[i + 1]; ratio = NOTCH[i + 1]; renderer.setPixelRatio(ratio); clean = 0; settle = 1.5; }
+    else if (lateCalls <= 1) { clean += 1.5; if (clean >= 20 && ratio < ratioTop && i > 0) { ratio = NOTCH[i - 1]; renderer.setPixelRatio(ratio); clean = 0; settle = 1.5; raised = 0; } }
+    else clean = 0;
+    calls = lateCalls = 0;
+  });
   window.__done = true;
 }
 

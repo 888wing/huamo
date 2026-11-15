@@ -674,6 +674,48 @@ Not verified: nothing was played by hand, so the difficulty is unknown (the numb
 three blows in 42 s); none of the new sounds were listened to; the photo build ran only `fin` after the last change;
 frame cost was not measured again (one more transparent strip and three DOM elements were added).
 
+## Round 29 (2026-11-15): the curtain that did not wake it; stutter
+
+The owner played round 28: the fog gate did not start the bout, and the game stuttered ("is the GPU too weak?").
+
+**The gate.** The fourth shadow's station (`pathPoint(.7)`) stood 2 m *inside* the curtain I drew in round 28. A player
+walked in through the curtain to reach that shadow, and nothing woke, because the giant waited for all four to be
+dead; it then woke with the player already inside. The scripted run never showed it: it only reports that the giant
+rises. Changes:
+- `FIGHT_STATIONS` are `[.22, .32, .41, .5]` of the path: 17, 13, 9 and 6 m outside the curtain.
+- The curtain always starts the bout. A shadow still alive is left outside (dismissed).
+- Coming to it is staged (`cine.kind === 'gate'`): control is set aside, the swordsman walks in at a walk, the smoke is
+  blown open there, bars close in, and the giant wakes once he is 2.6 m inside (`Giant.woken` if he is stopped).
+- The entrance could be skipped by any key, and a player walking in is pressing keys. It now takes space, enter,
+  escape or attack, after one second, and says so.
+
+**The stutter.** Not the GPU as such. Two things, both mine:
+- The picture was drawn at 1.5x the CSS size. On the test machine (an M4 laptop, 3024x1964 at 120 Hz, a Chrome
+  window of about 1512x860) that is 2.93 million pixels and **16.0 ms a frame** in the bout (`tools/cost.mjs`): the
+  whole of a 60 Hz frame. 1.25x costs 11.9 ms, 1x 9.7 ms. Every benchmark before this was taken at 720p and 1080p.
+- The game took one fixed 1/60 s step per drawn frame. A late frame was therefore slow motion, and a 120 Hz display
+  would have run it at up to double speed. Played in real time at that window size (`tools/realtime.mjs`): 38 fps and
+  the game clock at **59 %** of real time.
+
+Changes: the loop banks real time and spends it in whole steps (none on a call that comes too soon, two with one
+draw on a call that comes late, never more); the picture's ratio starts at what 1.8 million pixels allow and drops a
+notch (1.5, 1.25, 1.1, 1, .85, .75) when more than one call in six is late, coming back after twenty clean seconds.
+`?dpr=` fixes it; the HUD line shows it. Measured after, same window, real time: **55 to 58 fps in the bout, the game
+clock at 91 to 97 %** (the rest is hit pauses and staged slow motion), the picture starting at 1663x946 and the ratio
+settling at 1. About one frame in twenty still takes two refreshes, in bursts when a stamp throws ink about. With the
+display's rate limit off, as a stand-in for a fast display, the clock stays at 94 %: it does not run fast.
+
+Every scripted check passes again (`check-bout` fin x3 and bout, `stand`, `journey` with the stations moved: four
+shadows by 35 s, in through the curtain, the giant up at 40 s; sound; moves; shift).
+
+Not verified: a real 120 Hz display (headless Chrome calls at 60 Hz); a person's hands; whether what the owner calls
+stutter also includes the hit pauses, which are deliberate (a cut on the giant stops time for 5 frames, a stamp 8, a
+slam 11). `check-spar.mjs` and `check-boss.mjs` default to `dist/index.html`: pass `PAGE=` for the build you mean.
+
+**Another session is working in this checkout** (uncommitted `build.mjs` and `README.md` on 2026-11-15, making the
+default build the procedural one and adding `--photo-smoke`). This round was committed from a separate worktree with
+only its own files, and the README was left alone: `tools/realtime.mjs` and `tools/cost.mjs` are not listed there yet.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).
@@ -782,7 +824,7 @@ Phenomena, checked in slice views (`out/validate.png`, `out/v_carp2.png`):
   started inside the plateau). Cause not confirmed; enclosed pockets of fluid with no pressure reference are the
   suspect.
 - Solver A: no vortex street behind the carp at 0.25 m cells.
-- The simulation takes one fixed 1/60 s step per rendered frame, so it slows down if the frame rate drops.
+- (Fixed in round 29: the simulation no longer takes one step per rendered frame.)
 - After the giant falls, what is left of the curtain shows for a few seconds as a long grey bar while it fades.
 - The scripted player in `bout` is hit by the bellow's ring and by paired stamps; that is the script, but nobody has
   checked by hand that a person can read them in time.

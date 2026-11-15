@@ -73,7 +73,9 @@ export function pathPoint(f) {
   let d = f * total;
   for (let i = 0; i < seg.length; i++) { if (d <= seg[i] || i === seg.length - 1) { const t = Math.min(1, d / seg[i]); return [PATH[i][0] + (PATH[i + 1][0] - PATH[i][0]) * t, PATH[i][1] + (PATH[i + 1][1] - PATH[i][1]) * t]; } d -= seg[i]; }
 }
-export const FIGHT_STATIONS = [.22, .38, .54, .7].map(pathPoint);
+// where the four shadows wait, one after another. All of them stand outside the giant's curtain (the last by 6 m): when the
+// fourth stood inside it, a player walked in through the curtain to reach that shadow and nothing woke.
+export const FIGHT_STATIONS = [.22, .32, .41, .5].map(pathPoint);
 // The forest path widens into a clearing for the first encounter.
 export const DUEL_CLEARING = { center: FIGHT_STATIONS[0], entry: pathPoint(.15), radius: 4.6 };
 export function duelDist(x, z) {
