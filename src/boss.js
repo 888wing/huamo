@@ -2,7 +2,7 @@
 // and then fights like a wrestler: it stamps (a ring runs out through the fog and the reeds) and it throws its whole
 // weight down behind an open hand. No three.js in here; the rig in giant.js reads the numbers and reports back where
 // the hands and feet really are.
-import { height, ARENA, FOG_TOP } from './world.js';
+import { height, ARENA, FOG_TOP, SEAL, arenaDist } from './world.js';
 
 export const GH = 10.5; // metres tall
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a)), cl = x => Math.min(1, Math.max(0, x)), ease = x => { x = cl(x); return x * x * (3 - 2 * x); };
@@ -11,6 +11,8 @@ const S_UP = .85, S_HOLD = .32, S_DROP = .13, S_SET = 1.0, M_UP = 1.05, M_HIT = 
 const REACH = [4.0, 5.6];
 // sweep: the hand goes down at its own side, then scythes across the front. charge: down into the start, a drive forward, a skid
 const W_UP = .9, W_GO = .42, W_BACK = .9, C_UP = 1.0, C_GO = .55, C_END = .6, C_DIST = 6.5, STUN = 4;
+export const BOSS_HP = 24; // a cut on an ankle takes the stroke's weight (1, 1, 2); on the lying hand twice that; a stab down onto the head 6
+const RAGE = 1.22;        // past half its health everything it does is this much faster
 export const DYING = 6.5; // from the sword going in to the last of the ink: reel, sway, fall, run out
 
 export class Giant {
@@ -18,6 +20,8 @@ export class Giant {
     const [x, z] = ARENA.home;
     this.p = [x, height(x, z), z]; this.yaw = 0; this.mode = 'sleep'; this.clock = 0; this.time = 0; this.side = 1; this.walk = 0; this.walkAmt = 0;
     this.crouch = 1; this.lift = 0; this.squat = 0; this.wind = 0; this.down = 0; this.fall = 0; this.ik = 0; this.flinch = 0; this.roar = 0; this.glow = 0; this.fast = false;
+    this.hpMax = this.hp = BOSS_HP; this.phase = 1; this.rate = 1; this.enrage = false; this.twice = false; this.hitT = 0;
+    this.last = this.last2 = ''; this.swept = this.stopped = this.pinned = false; this.sweepR = undefined;
     this.lie = M_LIE; this.hold = 0; this.twist = 0; this.death = 0; this.dir = [0, 1]; this.sweepA = 0; this.gone = 0;
     this.target = [x, this.p[1], z + 5]; this.ring = null; this.parts = null; this.prev = null; this.vel = {}; this.seed = 7; this.think = 1; this.count = 0; this.done = false;
   }
@@ -26,21 +30,46 @@ export class Giant {
   get alive() { return this.mode !== 'dying' && this.mode !== 'dead'; }
   get planted() { return this.mode === 'slam' && this.clock > M_UP + M_HIT && this.clock < M_UP + M_HIT + this.lie + M_BACK * .35; }
   // the arm lying on the ground is a way up: hand, elbow, shoulder (null when it is not down)
-  get ramp() { const P = this.parts, k = this.side > 0 ? 'L' : 'R'; return P && this.mode === 'slam' && this.fall >= 1 && this.clock < M_UP + M_HIT + this.lie ? [P['hand' + k], P['elbow' + k], P['shoulder' + k]] : null; }
+  get ramp() { const P = this.parts, k = this.side > 0 ? 'L' : 'R'; return P && this.fall >= 1 && (this.mode === 'fell' || (this.mode === 'slam' && this.clock < M_UP + M_HIT + this.lie)) ? [P['hand' + k], P['elbow' + k], P['shoulder' + k]] : null; }
+  // A blow that counts. Returns what it did: null (it cannot be hurt just now), 'hit', 'rage' (half gone: the bout turns), 'fell' (all gone)
+  damage(n) {
+    if (!this.alive || this.hp <= 0 || this.mode === 'sleep' || this.mode === 'rise' || this.mode === 'rage') return null;
+    this.hp = Math.max(0, this.hp - n); this.hitT = .35;
+    if (this.hp <= 0) return 'fell';
+    if (this.phase === 1 && this.hp <= this.hpMax / 2) { this.phase = 2; this.enrage = true; return 'rage'; }
+    return 'hit';
+  }
+  // the stab from the air onto its head, while it still has fight in it: a heavy blow, and it rears
+  headHit() { const r = this.damage(6); if (r) this.flinch = 1; return r; }
+  // the swordsman fell and has come back: it stands on its mark, whole, and the bout begins again without the entrance
+  reset() { Object.assign(this, new Giant(), { mode: 'idle', crouch: 0, glow: 1, think: 1.6, yaw: Math.atan2(ARENA.gate[0] - ARENA.home[0], ARENA.gate[1] - ARENA.home[1]) }); }
   // the sword has gone into its head
   die() { if (!this.alive) return; this.go('dying'); this.ring = null; this.lift = this.wind = this.ik = this.roar = 0; this.fast = false; }
   go(mode) { this.mode = mode; this.clock = 0; this.done = false; }
-  rest(t) { this.go('idle'); this.think = t; this.lift = this.squat = this.wind = this.down = this.fall = this.ik = this.twist = 0; this.fast = false; this.lie = M_LIE; this.hold = 0; this.pinned = false; if (this.crouch < 1) this.crouch = 0; }
+  rest(t) { this.go('idle'); this.think = t; this.lift = this.squat = this.wind = this.down = this.fall = this.ik = this.twist = 0; this.fast = false; this.lie = M_LIE; this.hold = 0; this.pinned = false; if (this.crouch < 1) this.crouch = 0; if (this.enrage) { this.enrage = false; this.go('rage'); } }
 
   // pl: the player. ready: the four shadows are down. Returns what happened: [{ kind, at }]
   update(dt, pl, ready) {
-    const ev = [], { p } = this, P = this.parts; this.clock += dt; this.time += dt; const c = this.clock;
+    const ev = [], { p } = this, P = this.parts, raw = dt; dt *= this.rate; this.clock += dt; this.time += dt; this.hitT = Math.max(0, this.hitT - raw); const c = this.clock;
     // how fast each part moved, for the fog
     if (P && dt > 0) { for (const k in P) { const a = P[k], b = this.prev?.[k] ?? a; this.vel[k] = [0, 1, 2].map(i => Math.max(-30, Math.min(30, (a[i] - b[i]) / dt))); } this.prev = Object.fromEntries(Object.entries(P).map(([k, v]) => [k, [...v]])); }
     const dx = pl.p[0] - p[0], dz = pl.p[2] - p[2], d = Math.hypot(dx, dz), to = Math.atan2(dx, dz), off = wrap(to - this.yaw);
     const turn = rate => { this.yaw += Math.max(-rate * dt, Math.min(rate * dt, off)); };
     this.flinch = Math.max(0, this.flinch - dt * 2);
-    if (this.mode === 'sleep') { if (ready && d < 12.5) { this.go('rise'); ev.push({ kind: 'wake', at: [...p] }); } }
+    if (this.hp <= 0 && this.alive && this.mode !== 'fell') { // beaten: whatever it was doing, it goes down on the hand nearer whoever beat it
+      this.go('fell'); this.ring = null; this.lift = this.squat = this.wind = this.twist = this.roar = this.walkAmt = this.crouch = this.fall = this.down = this.ik = 0; this.fast = true; this.enrage = false;
+      this.side = off > 0 ? 1 : -1; const a = this.yaw + this.side * .32, x = p[0] + Math.sin(a) * 5, z = p[2] + Math.cos(a) * 5; this.target = [x, height(x, z), z];
+      ev.push({ kind: 'fell', at: [...p] });
+    }
+    if (this.mode === 'sleep') { if (ready && arenaDist(pl.p[0], pl.p[2]) < SEAL - .4) { this.go('rise'); ev.push({ kind: 'wake', at: [...p] }); } }
+    else if (this.mode === 'fell') { // on one hand, heaving, for whatever ends it
+      const k = c / .6; this.fall = cl(k) ** 2; this.down = this.fall; this.ik = cl(k * 2.5); this.fast = k < 2.5; this.glow = .35 + .25 * Math.sin(this.time * 7);
+      if (k >= 1 && !this.done) { this.done = true; ev.push({ kind: 'slam', at: [...this.target] }); }
+    } else if (this.mode === 'rage') { // half its health gone: it rears back and bellows, the air goes out from it in a ring, and it is faster from here on
+      this.roar = Math.sin(Math.PI * cl(c / 2.3)); this.glow = 1; turn(.6);
+      if (c > .75 && !this.done) { this.done = true; this.rate = RAGE; ev.push({ kind: 'rage', at: P?.head ?? [...p] }); this.ring = { at: [p[0], height(p[0], p[2]), p[2]], r: 0, t: 0, hit: false }; }
+      if (c > 2.5) { this.roar = 0; this.rest(.25); }
+    }
     else if (this.mode === 'rise') { // unfolds from the crouch, throws its head back, then stamps once before the bout
       this.crouch = 1 - ease(c / 2.4); this.glow = cl(c / .6); this.roar = Math.sin(Math.PI * cl((c - 1.5) / 1.6)); turn(.5);
       if (c > 1.9 && !this.done) { this.done = true; ev.push({ kind: 'roar', at: P?.head ?? [...p] }); }
@@ -54,8 +83,11 @@ export class Giant {
         else if (far > 1.5 && d > 7) this.go('back');                            // drawn off its mark: it backs up to it
         else if (d > 17) this.think = .5;                                        // out of reach: it only watches
         else if (!facing) this.think = .12;
-        else if (d < 3.3) this.go('stomp');                                      // underfoot
+        else if (d < 3.3) this.go(r < .5 ? 'stomp' : r < .78 ? 'sweep' : 'slam');  // underfoot: mostly it stamps
         else if (d <= 6.6) this.go(r < .5 ? 'slam' : r < .78 ? 'sweep' : 'stomp');
+        // (never the same thing three times running: whoever has read it twice gets something else to read)
+        if (this.mode === this.last && this.mode === this.last2 && this.mode !== 'idle') this.go(this.mode === 'stomp' ? 'slam' : this.mode === 'slam' ? 'sweep' : 'stomp');
+        if (this.mode !== 'idle') { this.last2 = this.last; this.last = this.mode; }
         else if (d > 8.5 && d < 16 && r < .55) this.go('charge');
         else this.go('stomp');
         if (this.mode === 'slam' || this.mode === 'sweep') this.side = off > 0 ? 1 : -1;   // the hand on the player's side
@@ -76,9 +108,13 @@ export class Giant {
         if (pl.form === 3 && pl.p[1] < FOG_TOP && Math.hypot(pl.p[0] - at[0], pl.p[2] - at[2]) < 6.5) { pl.v[1] = 22.5; pl.p[1] = FOG_TOP - .29; ev.push({ kind: 'gate', at: [...pl.p] }); }
       }
       this.squat = c >= land ? 1 - ease((c - land) / S_SET) : 0;
-      if (c > land + S_SET) this.rest(.7 + this.rnd() * .7);
+      if (c > land + S_SET) { // (enraged, the other foot follows at once)
+        if (this.phase === 2 && !this.twice && !this.enrage) { this.twice = true; this.side = -this.side; this.go('stomp'); this.clock = S_UP * .4; }
+        else { this.twice = false; this.rest(.7 + this.rnd() * .7); }
+      }
     } else if (this.mode === 'slam') {
-      if (this.hold > 0) { this.hold -= dt; this.lie = Math.max(this.lie, c - M_UP - M_HIT + .3); }   // something is on the arm: it stays where it is
+      if (this.hold > 0) { this.hold -= dt; this.lie = Math.max(this.lie, c - M_UP - M_HIT + .3); }
+      else if (this.enrage) this.lie = Math.min(this.lie, c - M_UP - M_HIT);                              // the bout is turning: the hand comes up now   // something is on the arm: it stays where it is
       const k1 = c / M_UP, k2 = (c - M_UP) / M_HIT, k3 = (c - M_UP - M_HIT - this.lie) / M_BACK;
       this.fast = k2 > 0 && k2 < 3.5; // the body follows the hand down at once
       if (k1 < .72) { // until late in the wind-up the hand is still being aimed
@@ -127,7 +163,7 @@ export class Giant {
     } else if (this.mode === 'dead') this.gone += dt;
     // the ring a stamp sends out: it catches whoever is standing on the ground when it passes
     if (this.ring) {
-      const g = this.ring, r0 = g.r; g.t += dt; g.r += 14 * dt;
+      const g = this.ring, r0 = g.r; g.t += raw; g.r += 14 * raw;
       const rd = Math.hypot(pl.p[0] - g.at[0], pl.p[2] - g.at[2]);
       if (!g.hit && rd > r0 && rd <= g.r && rd < 11.5 && pl.p[1] - height(pl.p[0], pl.p[2]) < .45 && pl.form !== 2 && this.canHurt(pl)) { g.hit = true; this.hurt(pl, g.at, 1, 9, ev); }
       if (g.r > 15) this.ring = null;
@@ -145,7 +181,7 @@ export class Giant {
 
   // what a sword stroke can reach: the hand while it lies on the ground, otherwise the nearer ankle
   aim(q) {
-    const P = this.parts; if (!P || !this.awake || !this.alive) return null;
+    const P = this.parts; if (!P || !this.awake || !this.alive || this.hp <= 0) return null;
     const opts = [P.footL, P.footR]; if (this.planted) opts.unshift(P[this.side > 0 ? 'handL' : 'handR']);
     let best = null, bd = 1e9;
     for (const o of opts) { const d = Math.hypot(o[0] - q[0], o[2] - q[2]) - (o === opts[0] && this.planted ? 2 : 0); if (d < bd) { bd = d; best = o; } }
@@ -154,15 +190,15 @@ export class Giant {
   // the player's stroke against the giant. A cut on the planted hand makes it flinch; its ankles only bleed ink
   struck(pl) {
     const P = this.parts, t = pl.actT;
-    if (!P || !this.awake || !this.alive || pl.form !== 0 || pl.hit) return null;
-    const { hitStart, hitEnd, angle } = pl.swordMove;
+    if (!P || !this.awake || !this.alive || this.hp <= 0 || pl.form !== 0 || pl.hit) return null;
+    const { hitStart, hitEnd, angle, power = 1 } = pl.swordMove;
     if (t < hitStart || t > hitEnd) return null;
     const hand = P[this.side > 0 ? 'handL' : 'handR'], near = (o, r) => Math.hypot(o[0] - pl.p[0], o[2] - pl.p[2]) < r && Math.abs(wrap(Math.atan2(o[0] - pl.p[0], o[2] - pl.p[2]) - pl.yaw)) < angle;
     if (this.planted && near(hand, 4.3)) { // a cut on the lying hand: it flinches, and the arm stays down for STUN seconds from now
       pl.hit = true; this.flinch = 1; this.count++; if (!this.pinned) { this.pinned = true; this.lie = Math.max(this.lie, this.clock - M_UP - M_HIT + STUN); }
-      return { kind: 'cut', at: [hand[0], hand[1] + .5, hand[2]], big: true };
+      return { kind: 'cut', at: [hand[0], hand[1] + .5, hand[2]], big: true, res: this.damage(power * 2) };
     }
-    for (const k of ['footL', 'footR']) if (P[k][1] - height(P[k][0], P[k][2]) < 1.5 && near(P[k], 3.6)) { pl.hit = true; this.count++; return { kind: 'cut', at: [P[k][0], P[k][1] + .9, P[k][2]] }; }
+    for (const k of ['footL', 'footR']) if (P[k][1] - height(P[k][0], P[k][2]) < 1.5 && near(P[k], 3.6)) { pl.hit = true; this.count++; return { kind: 'cut', at: [P[k][0], P[k][1] + .9, P[k][2]], res: this.damage(power) }; }
     return null;
   }
   // the bulk a flying or falling body cannot pass through: [x, y, z, radius]

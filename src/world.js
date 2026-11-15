@@ -86,6 +86,21 @@ export function arenaDist(x, z) {
   const [ax, az] = ARENA.home, [bx, bz] = ARENA.gate, dx = bx - ax, dz = bz - az, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
   return Math.hypot(x - ax - dx * t, z - az - dz * t);
 }
+// The bout is fought inside a curtain of fog that runs round the clearing this far from the line home-gate. Walking in
+// through it wakes the giant; after that it does not let anyone out.
+export const SEAL = 8.5;
+// pulls a point back inside the curtain; true if it was outside
+export function arenaKeep(p, r = SEAL - .6) {
+  const [ax, az] = ARENA.home, [bx, bz] = ARENA.gate, dx = bx - ax, dz = bz - az, t = Math.min(1, Math.max(0, ((p[0] - ax) * dx + (p[2] - az) * dz) / (dx * dx + dz * dz)));
+  const cx = ax + dx * t, cz = az + dz * t, ex = p[0] - cx, ez = p[2] - cz, d = Math.hypot(ex, ez);
+  if (d <= r) return false; p[0] = cx + ex / d * r; p[2] = cz + ez / d * r; return true;
+}
+// the curtain's line on the ground, as a closed loop of points [x, z]
+export function arenaEdge(n = 72, r = SEAL) {
+  const [ax, az] = ARENA.home, [bx, bz] = ARENA.gate, ux = bx - ax, uz = bz - az, out = [];
+  for (let i = 0; i <= n; i++) { const a = i / n * 6.2832, cx = Math.sin(a), cz = Math.cos(a), g = cx * ux + cz * uz > 0; out.push([(g ? bx : ax) + cx * r, (g ? bz : az) + cz * r]); }
+  return out;
+}
 // tree trunks: [x, z, radius], filled in by the stage. pushOut keeps a body (or the camera) outside them.
 export const OBSTACLES = [];
 export function pushOut(p, pad, list = OBSTACLES) {

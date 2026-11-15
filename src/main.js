@@ -2,9 +2,9 @@
 import * as THREE from 'three/webgpu';
 import { createDevice, Gpu } from './gpu.js';
 import { Sim3D } from './sim3d.js';
-import { FOG_TOP, height, terrainTexture, pushOut, DUEL_CLEARING } from './world.js';
+import { FOG_TOP, height, terrainTexture, pushOut, DUEL_CLEARING, arenaKeep, arenaEdge, arenaDist, SEAL } from './world.js';
 import { buildStage, buildTrail, buildSplash, noiseTexture, external, PAPER } from './stage.js';
-import { buildGroundInk, buildBlot, HIT_FEEDBACK } from './combat-fx.js';
+import { buildGroundInk, buildBlot, buildCurtain, HIT_FEEDBACK } from './combat-fx.js';
 import { buildBeasts } from './beasts.js';
 import { createFog } from './fog.js';
 import { Player, Enemy, spar, FORMS, HP, MORPH, SHIFT_MIN, INK_PER_CUT } from './player.js';
@@ -44,7 +44,7 @@ async function boot() {
   const shade = new Figure(scene, noise, { robe: .2, cloak: .02, legs: .06, hat: .1, skin: .3, wraps: .16 });
   const enemy = new Enemy(), fx = [], blasts = [], splash = buildSplash(trail.scene);
   const groundInk = buildGroundInk(scene, noise);
-  const giant = new Giant(), oni = new GiantRig(scene, noise), blot = buildBlot(scene, noise);
+  const giant = new Giant(), oni = new GiantRig(scene, noise), blot = buildBlot(scene, noise), curtain = buildCurtain(scene, noise, arenaEdge());
   if (q.get('hide')?.includes('giant')) { oni.group.visible = false; oni.cloth.mesh.visible = false; }
   // only what reaches into the simulated box is worth sending to it
   const inBox = e => { const b = e.b ?? e.a, m = e.r + 1; return [0, 2].every(i => Math.max(e.a[i], b[i]) > sim.org[i] - m && Math.min(e.a[i], b[i]) < sim.org[i] + n[i] * h + m); };
@@ -165,12 +165,21 @@ async function boot() {
   const bars = [0, 1].map(i => mk(`position:fixed;left:-2%;right:-2%;${i ? 'bottom' : 'top'}:-1vh;height:0;background:#121419;pointer-events:none;filter:url(#ib)`));
   const title = mk(`position:fixed;right:11%;top:14%;writing-mode:vertical-rl;font:900 11vh/1.05 ${SERIF};color:#121419;filter:url(#ib);pointer-events:none;opacity:0`,
     `巨相撲鬼<span style="writing-mode:horizontal-tb;display:inline-block;margin-top:1.4vh;padding:.5vh .9vh;background:#b3301f;color:#f1e9da;font:700 2.6vh/1.1 ui-serif,Georgia,serif;border-radius:.4vh">Boss</span>`);
-  const endCard = mk('position:fixed;inset:0;display:grid;place-items:center;background:rgba(236,230,216,0);pointer-events:none;opacity:0',
-    `<div style="text-align:center;font:600 3vh/1.9 ${SERIF};color:#121419"><div style="display:inline-block;padding:1.2vh 1.4vh;background:#b3301f;color:#f1e9da;font:700 9vh/1.1 ${SERIF};writing-mode:vertical-rl;border-radius:.6vh">化墨</div><br>巨相撲鬼 伏誅<br><span style="opacity:.6;font-size:2vh">按 R 再來一次</span></div>`);
-  // the ways onto its head: one line for each beast at the foot of the left edge. The line of the beast in use says what comes next
-  const ROUTES = [['虎', 'Shift ×2', '巨掌拍落地面時　衝上手臂'], ['鶴', '空白 ×2', '按住空白飛過頭頂　按出招刺下'], ['鯉', 'Q ×2', '潛到腳邊等它踏地　拋到高處按出招']];
-  const hint = mk(`position:fixed;left:18px;bottom:14px;pointer-events:none;font:600 15px/1.75 ${SERIF};color:#121419;opacity:0;text-shadow:0 0 5px #ece6d8,0 0 2px #ece6d8`, ROUTES.map(() => '<div style="white-space:nowrap"></div>').join(''));
-  let hintK = 0, hintKey = '';
+  // The giant's health, shown the way these bouts always show it: its name, and one long stroke along the foot of the
+  // picture. Red is what it has left; the grey behind it is what the last blows took, catching up.
+  const bossBar = mk('position:fixed;left:50%;bottom:60px;transform:translateX(-50%);width:min(600px,56vw);pointer-events:none;opacity:0',
+    `<div style="font:700 17px/1.2 ${SERIF};color:#121419;letter-spacing:.22em;margin:0 0 -3px 8px;text-shadow:0 0 5px #ece6d8">巨相撲鬼</div>`
+    + `<svg viewBox="0 0 600 24" width="100%" style="display:block;overflow:visible"><g filter="url(#ib)">`
+    + `<path d="M6 12 C 150 6, 420 17, 594 10" fill="none" stroke="#121419" stroke-opacity=".16" stroke-width="9" stroke-linecap="round"/>`
+    + `<path d="M6 12 C 150 6, 420 17, 594 10" pathLength="1" fill="none" stroke="#121419" stroke-opacity=".5" stroke-width="9" stroke-linecap="round"/>`
+    + `<path d="M6 12 C 150 6, 420 17, 594 10" pathLength="1" fill="none" stroke="#b3301f" stroke-width="9" stroke-linecap="round"/></g></svg>`);
+  const [bossLag, bossNow] = [...bossBar.querySelectorAll('path')].slice(1); let bossK = 0, bossFill = 0, bossLagV = 1;
+  // A band of ink across the middle of the picture with two characters on it: the bout won, or the swordsman cut down
+  const band = mk('position:fixed;left:-2%;right:-2%;top:50%;transform:translateY(-50%);height:22vh;display:grid;place-items:center;background:rgba(18,20,25,.9);filter:url(#ib);pointer-events:none;opacity:0',
+    `<div style="text-align:center;font:900 11.5vh/1.05 ${SERIF};letter-spacing:.7em;text-indent:.7em"><div style="font:600 2.3vh/1.6 ${SERIF};letter-spacing:.5em;text-indent:.5em;opacity:.75"></div><span></span></div>`);
+  let bandT = -1, bandKind = '';
+  const bandShow = (kind, small, big, color) => { bandKind = kind; bandT = 0; band.firstChild.style.color = color; band.firstChild.firstChild.textContent = small; band.firstChild.lastChild.textContent = big; };
+  const again = mk(`position:fixed;left:50%;bottom:26px;transform:translateX(-50%);font:600 15px/1 ${SERIF};color:#121419;letter-spacing:.2em;pointer-events:none;opacity:0;text-shadow:0 0 5px #ece6d8`, '按 R 再來一次');
   const stamps = [];
   const stamp = (text, at, size = 1, red = false) => {
     const el = mk(`position:fixed;left:0;top:0;pointer-events:none;white-space:nowrap;font:900 ${Math.round(innerHeight * .17 * size)}px/1 ${SERIF};color:${red ? '#b3301f' : '#121419'};filter:url(#ib);will-change:transform,opacity`);
@@ -190,6 +199,7 @@ async function boot() {
   const tgt = new THREE.Vector3(), eye = new THREE.Vector3(), want = new THREE.Vector3();
   const soles = [new THREE.Vector3(), new THREE.Vector3()];
   let camReady = false, rideWas = false, rideSet = false, rideAz = 0, rideTo = 0;
+  let curtainK = 1, curtainOpen = 1, curtainSee = 1;
 
   function tick() {
     // a blow that lands stops time for a few frames: that pause is where the weight is felt
@@ -203,7 +213,8 @@ async function boot() {
     const held = player.staged ? { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false } : demo ? override : input();
     player.update(dt, held, cam, enemy.alive ? enemy.p : giant.aim(player.p));
     // the giant's bulk: a body in the air cannot pass through it
-    if (!player.ride && player.plunge !== 1) for (const [x, y, z, r] of giant.volumes()) {
+    if (giant.awake && giant.alive && !player.ride && player.fallen <= 0) arenaKeep(player.p);   // the curtain lets no one out while the bout lasts
+    if (!player.ride && player.plunge !== 1 && !(player.fin && player.form === 3)) for (const [x, y, z, r] of giant.volumes()) {
       const dx = player.p[0] - x, dy = player.p[1] + .8 - y, dz = player.p[2] - z, d = Math.hypot(dx, dy, dz);
       if (d < r && d > .01) { const k = (r - d) / d; player.p[0] += dx * k; player.p[2] += dz * k; player.p[1] = Math.max(height(player.p[0], player.p[2]), player.p[1] + dy * k); }
     }
@@ -221,7 +232,11 @@ async function boot() {
       }
       else if (ev.kind === 'mount') shake = Math.max(shake, .4);
       else if (ev.kind === 'onhead') { shake = Math.max(shake, .8); fx.push({ a: ev.at, r: 1.6, ink: .25, div: 12, life: .2, t: 0 }); }
-      else if (ev.kind === 'breach') { fx.push({ a: ev.at, r: 1.6, ink: 0, div: 16, life: .2, t: 0 }); blasts.push({ p: ev.at, r: 3, split: 160, den: -8, life: .35, t: 0 }); }
+      else if (ev.kind === 'breach') { const k = ev.big ? 2.2 : 1; fx.push({ a: ev.at, r: 1.6 * k, ink: 0, div: 16 * k, life: .2, t: 0 }); blasts.push({ p: ev.at, r: 3 * k, split: 160 * k, den: -8 * k, life: .35, t: 0 }); if (ev.big) { splash.burst(ev.at, [0, 0], 60, 1.1); shake = Math.max(shake, 1.2); } }
+      else if (ev.kind === 'headhit') { // the stab from the air onto its head while it still fights: a heavy blow
+        sound.play('cut', { k: 1.5 }); shake = Math.max(shake, 1.6); kick = Math.max(kick, .6); hold = Math.max(hold, 8); flash = Math.max(flash, .3); burstK = .8; burstAt = ev.at; dealt++;
+        fx.push({ a: ev.at, r: 2.4, ink: 1.2, div: 30, life: .3, t: 0 }); blasts.push({ p: ev.at, r: 6, split: 240, den: -24, life: .5, t: 0 }); splash.burst(ev.at, [0, 0], 70, 1.2);
+      }
       else if (ev.kind === 'headstab') { // the sword goes into the giant's head: everything stops for it
         cine = { kind: 'kill', t: 0, dur: 3.6, a0: Math.atan2(eye.x - ev.at[0], eye.z - ev.at[2]) }; show(true);
         slowT = 1.5; hold = 14; flash = 1; kick = 1; shake = 2.4; invertN = 3; burstK = 1; burstAt = ev.at; geyser = 1.1; tv.setFromMatrixColumn(camera.matrixWorld, 0); stamp('斬', [ev.at[0] + tv.x * 3, ev.at[1] + 1.2, ev.at[2] + tv.z * 3], 1.5, true);   // (beside the head, not over the blow itself)
@@ -233,7 +248,9 @@ async function boot() {
       }
     }
     // the last blow: the world slows for a moment as the swordsman goes down
-    if (player.fallen > 0 && !wasFallen) slowT = .45;
+    if (player.fallen > 0 && !wasFallen) { slowT = .45; if (giant.awake && giant.alive && giant.hp > 0) bandShow('dead', '', '墨盡', '#b3301f'); }
+    // cut down in the bout, the swordsman gathers again inside the curtain and the giant stands whole on its mark: no entrance the second time
+    if (player.fallen <= 0 && wasFallen && giant.awake && giant.alive && giant.hp > 0) { giant.reset(); cine = null; show(false); }
     wasFallen = player.fallen > 0;
     const enemyWasFalling = enemy.mode === 'fall' && enemy.fallT < 1;
     enemy.update(dt, player.p);
@@ -247,18 +264,23 @@ async function boot() {
     // the giant: every stamp and blow shakes the picture, throws ink up and blows the fog and the smoke open
     const gev = giant.update(dt, player, enemy.mode === 'done'), cut = giant.struck(player); if (cut) gev.push(cut);
     for (const ev of gev) {
-      const [sh, fl, kk, hd, r, div, n, size] = { sweep: [1.2, .1, .4, 0, 3, 20, 0, 1], charge: [1.6, .12, .5, 0, 4, 26, 0, 1], gate: [.6, .1, .3, 0, 3, 30, 0, 1], topple: [3.6, .5, 1, 10, 6, 70, 150, 1.3], dead: [0, 0, 0, 0, 1, 0, 0, 1], wake: [.9, 0, 0, 0, 3, 16, 0, 1], roar: [1.7, .2, .5, 0, 4.5, 34, 0, 1], step: [.8, 0, .2, 0, 2.6, 16, 20, 1], stomp: [2.8, .3, .9, 8, 5, 55, 90, 1.15], slam: [3.2, .55, 1, 11, 4.5, 60, 100, 1.15], struck: [1.3, .3, .5, 6, 2, 18, 50, 1], cut: [.9, .22, .4, 5, 2, 16, ev.big ? 70 : 34, 1.4] }[ev.kind];
+      const [sh, fl, kk, hd, r, div, n, size] = { sweep: [1.2, .1, .4, 0, 3, 20, 0, 1], charge: [1.6, .12, .5, 0, 4, 26, 0, 1], gate: [.6, .1, .3, 0, 3, 30, 0, 1], topple: [3.6, .5, 1, 10, 6, 70, 150, 1.3], dead: [0, 0, 0, 0, 1, 0, 0, 1], fell: [2.2, .6, .8, 12, 5, 40, 120, 1.2], rage: [2.4, .45, .8, 9, 6, 60, 0, 1], wake: [.9, 0, 0, 0, 3, 16, 0, 1], roar: [1.7, .2, .5, 0, 4.5, 34, 0, 1], step: [.8, 0, .2, 0, 2.6, 16, 20, 1], stomp: [2.8, .3, .9, 8, 5, 55, 90, 1.15], slam: [3.2, .55, 1, 11, 4.5, 60, 100, 1.15], struck: [1.3, .3, .5, 6, 2, 18, 50, 1], cut: [.9, .22, .4, 5, 2, 16, ev.big ? 70 : 34, 1.4] }[ev.kind];
       shake = Math.max(shake, sh); flash = Math.max(flash, fl); kick = Math.max(kick, kk); hold = Math.max(hold, hd);
-      sound.play({ wake: 'rumble', roar: 'groar', step: 'gstep', stomp: 'stomp', slam: 'slam', sweep: 'sweep', charge: 'sweep', struck: 'hurt', cut: 'cut', topple: 'slam', dead: 'end', gate: 'splash' }[ev.kind]);
+      sound.play({ wake: 'rumble', roar: 'groar', step: 'gstep', stomp: 'stomp', slam: 'slam', sweep: 'sweep', charge: 'sweep', struck: 'hurt', cut: 'cut', topple: 'slam', gate: 'splash', rage: 'groar', fell: 'kill' }[ev.kind]);
       fx.push({ a: ev.at, r, ink: 0, div, life: .3, t: 0 });
       if (n) splash.burst(ev.at, ev.dir ?? [0, 0], n, size);
       if (sh > 1.5) blasts.push({ p: [ev.at[0], ev.at[1] + (ev.kind === 'roar' ? 0 : 1.2), ev.at[2]], r: ev.kind === 'roar' ? 8 : 11, split: 300, den: ev.kind === 'roar' ? -12 : -40, life: .7, t: 0 });
-      if (ev.kind === 'wake') { player.home = [-1, -6]; if (!q.has('nocine') && !cam.fixed) { cine = { kind: 'entrance', t: 0, dur: 5.6, eye0: eye.clone(), tgt0: tgt.clone(), named: false }; show(true); } }
+      if (ev.kind === 'wake') { player.home = [-1, -6]; sound.play('clacks'); if (!q.has('nocine') && !cam.fixed) { cine = { kind: 'entrance', t: 0, dur: 5.6, eye0: eye.clone(), tgt0: tgt.clone(), named: false }; show(true); } }
       // heavy blows are drawn as well as felt: lines thrown out from where they land, a frame turned inside out, a character stamped on the picture
       if (ev.kind === 'stomp' || ev.kind === 'slam' || ev.kind === 'topple') { burstK = 1; burstAt = ev.at; invertN = 2; stamp(ev.kind === 'slam' ? '砰' : '轟', [ev.at[0], ev.at[1] + 1.2, ev.at[2]], ev.kind === 'topple' ? 1.3 : 1); }
       if (ev.kind === 'sweep' || ev.kind === 'charge') { burstK = .7; burstAt = ev.at; }
       if (ev.kind === 'roar') stamp('吼', ev.at, 1.1);
-      if (ev.kind === 'dead') endT = 0;
+      if (ev.kind === 'rage') { burstK = 1; burstAt = ev.at; invertN = 3; slowT = Math.max(slowT, .5); stamp('怒', ev.at, 1.35, true); }   // half its health gone: the bout turns
+      if (ev.kind === 'fell') { // all of it gone: the bout is won, and what is left is how it ends. One of the three beasts, by lot, carries the sword to its head
+        const kinds = ['tiger', 'crane', 'carp'], pick = kinds.includes(q.get('finish')) ? q.get('finish') : kinds[Math.floor(Math.random() * 3)];
+        player.finish(pick); cine = { kind: 'finish', t: 0, dur: 14 }; show(true); slowT = Math.max(slowT, 1.1); burstK = 1; burstAt = ev.at; invertN = 2;
+      }
+      if (ev.kind === 'dead') { endT = 0; sound.play('end'); }
       if (ev.kind === 'struck') taken++; else if (ev.kind === 'cut') { dealt++; player.ink = Math.min(1, player.ink + INK_PER_CUT); }
     }
     for (const ev of spar(player, enemy)) {
@@ -319,7 +341,7 @@ async function boot() {
     const beat = Math.floor(player.phase * (f === 1 ? 2.2 / Math.PI : 1.25 / 6.2832));
     if (beat !== heard.beat && f === 1 && (player.ground || player.ride) && run > .2) sound.play('step', { v: 1 }); if (beat !== heard.beat && f === 2) sound.play('flap'); heard.beat = beat;
     if (f === 1 && act >= 0 && !(heard.act >= 0)) sound.play('roar'); heard.act = act;
-    sound.frame(DT, run, giant.awake && giant.alive);
+    sound.frame(DT, run, giant.awake && giant.alive, giant.awake && giant.alive && giant.hp > 0 && giant.mode !== 'rise' && player.fallen <= 0 ? giant.phase : 0);
 
     // ---- camera: follows with a little lag, and shakes when something big happens
     shake = Math.max(player.shake, shake * Math.exp(-9 * DT)); player.shake = 0;
@@ -329,19 +351,19 @@ async function boot() {
     // the tiger on the head it comes in level with the crown. It is handed back looking the way it was left.
     // (the drop back and the look upwards are for someone on the ground at its feet: high in the air beside it the view stays close)
     const low = 1 - .85 * sm(player.p[1] - height(player.p[0], player.p[2]), 2.5, 7);
-    const rideCam = !!player.ride && player.ride.kind !== 'rock' && !!giant.parts && giant.alive && !cam.fixed;
+    const rideCam = ((!!player.ride && player.ride.kind !== 'rock') || !!player.fin) && !!giant.parts && giant.alive && !cam.fixed;
     if (rideCam && !rideWas) { rideAz = Math.atan2(eye.x - giant.p[0], eye.z - giant.p[2]); rideTo = rideAz; }
     if (!rideCam && rideWas && !cine) cam.yaw = Math.atan2(tgt.x - eye.x, tgt.z - eye.z);
     rideWas = rideCam;
     if (rideCam) {
-      const P = giant.parts, c = P.crown, G = giant.p, on = player.ride.kind === 'head', ramp = giant.ramp;
-      if (ramp && player.ride.kind === 'arm') { // side-on to the arm, on the side away from the body; never swung more than a third of the way round
+      const P = giant.parts, c = P.crown, G = giant.p, on = player.ride?.kind === 'head', ramp = giant.ramp;
+      if (ramp && (player.ride?.kind === 'arm' || player.fin)) { // side-on to the arm, on the side away from the body; never swung more than a third of the way round
         const ux = ramp[2][0] - ramp[0][0], uz = ramp[2][2] - ramp[0][2], sgn = uz * (ramp[1][0] - G[0]) - ux * (ramp[1][2] - G[2]) > 0 ? 1 : -1;
         const mx = (ramp[0][0] + ramp[2][0]) / 2 + sgn * uz * 3, mz = (ramp[0][2] + ramp[2][2]) / 2 - sgn * ux * 3, d = Math.atan2(Math.sin(Math.atan2(mx - G[0], mz - G[2]) - rideAz), Math.cos(Math.atan2(mx - G[0], mz - G[2]) - rideAz));
         if (!rideSet) { rideSet = true; rideTo = rideAz + Math.max(-1.1, Math.min(1.1, d)); }
       }
       rideAz += Math.atan2(Math.sin(rideTo - rideAz), Math.cos(rideTo - rideAz)) * (1 - Math.exp(-2.6 * dt));
-      const near = on && player.ride.stab >= 0, R = near ? 5 : on ? 6.8 : 10.5, hx = on ? c[0] : G[0], hz = on ? c[2] : G[2], w = .62;   // (w: how much of the look goes to the tiger, the rest to the head it is making for)
+      const near = on && player.ride.stab >= 0, R = near ? 5 : on ? 6.8 : player.fin && !player.ride ? 11.5 : 10.5, hx = on ? c[0] : G[0], hz = on ? c[2] : G[2], w = .62;   // (w: how much of the look goes to the tiger, the rest to the head it is making for)
       want.set(on ? c[0] : player.p[0] * w + P.head[0] * (1 - w), on ? c[1] + .8 : (player.p[1] + .6) * w + P.head[1] * (1 - w), on ? c[2] : player.p[2] * w + P.head[2] * (1 - w));
       tgt.lerp(want, 1 - Math.exp(-5 * dt));
       want.set(hx + Math.sin(rideAz) * R, on ? c[1] + (near ? 1.1 : 1.5) : G[1] + 2.2 + .4 * (player.p[1] - G[1]), hz + Math.cos(rideAz) * R);
@@ -373,7 +395,7 @@ async function boot() {
         fov = 50 + 12 * a * (1 - c); roll = .07 * b * (1 - c);
         if (u > 3.0 && !cine.named) { cine.named = true; titleOn = true; titleT = 0; flash = Math.max(flash, .6); }
         if (u > 4.6) show(false);
-      } else if (P) { // the kill: round the head, close
+      } else if (cine.kind === 'kill' && P) { // the kill: round the head, close
         const c = P.crown, ang = cine.a0 + 1.9 * sm(u, 0, cine.dur), R = 6.5 - 1.5 * sm(u, 0, 1.2);
         eye.set(c[0] + Math.sin(ang) * R, c[1] + 1.4 + .25 * u, c[2] + Math.cos(ang) * R); tgt.set(c[0], c[1] - .3, c[2]); fov = 46;
       }
@@ -486,7 +508,8 @@ async function boot() {
       // the giant is gone: the fog lifts, and the slice closes on its seal
       if (endT >= 0) {
         endT += DT; const k = sm(endT, 0, 5); fog.u.kFog.value = .13 - .08 * k; veils.forEach(v => { v.amount0 ??= v.amount; v.amount = v.amount0 * (1 - .65 * k); });
-        const e = sm(endT, 2.2, 4.6); ended = endT > 2.2; endCard.style.opacity = e; endCard.style.background = `rgba(236,230,216,${.82 * e})`;
+        if (endT - DT < .5 && endT >= .5) bandShow('won', '巨相撲鬼', '伏誅', '#ece6d8');
+        ended = endT > 2.2; again.style.opacity = (.7 * sm(endT, 6.2, 7.4)).toFixed(3);
       }
     }
     fog.u.hero.value.set(player.p[0], player.p[1] + (f < 2 ? .95 : 0), player.p[2]); fog.u.heroR.value = [1.4, 1.6, 2.4, 1.6][f];
@@ -505,7 +528,7 @@ async function boot() {
     // The giant is always partly legible once it is awake, and fully while it raises a leg or an arm or lies on its hand:
     // the foreground veils are heavy, and its tells are what the player has to read.
     fog.u.giantY.value = giant.p[1];
-    const giantShown = giant.awake ? .5 + .5 * Math.max(giant.lift, giant.wind, giant.roar, giant.planted || rideCam ? 1 : 0) : .22;
+    const giantShown = giant.awake ? .5 + .5 * Math.max(giant.lift, giant.wind, giant.roar, giant.planted || rideCam || giant.mode === 'fell' ? 1 : 0) : .22;
     const showOpponent = enemy.mode === 'done' ? giantShown : enemy.mode === 'fall' || enemy.mode === 'gone' || enemy.mode === 'reel'
       ? 1 : enemy.alive && nearOpponent ? .35 : 0;
     enemyClear.value += (showOpponent - enemyClear.value) * (1 - Math.exp(-(showOpponent > enemyClear.value ? 18 : 4) * dt));
@@ -517,30 +540,28 @@ async function boot() {
       const tot = ms ? Object.values(ms).reduce((a, b) => a + b, 0) : 0;
       const pips = (n, of) => '●'.repeat(Math.max(0, n)) + '○'.repeat(of - Math.max(0, n));
       const move = f === 0 && act >= 0 ? `  ${['橫斬', '挑斬', '下劈'][player.combo ?? 0]}` : '';
-      let s = `${FORMS[f]}${move}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? Math.ceil(enemy.hp) : 0, enemy.maxHp ?? 6)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? '  巨相撲鬼' : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
+      let s = `${FORMS[f]}${move}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? Math.ceil(enemy.hp) : 0, enemy.maxHp ?? 6)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? `  巨相撲鬼 ${giant.hp}/${giant.hpMax}` : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
       if (drawer) {
-        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（不按方向＝後跳，按方向＝翻滾；鶴鯉為下降）\n空中按出招＝下突刺 · 閃避尾段按出招＝衝斬 · 被擊飛時按空白＝受身\n化獸（共用下方的墨）：跳躍中再按空白＝鶴 · 閃避中再按 Shift＝虎 · 連按兩下格擋＝鯉 · 化獸時按出招＝變回並出招，格擋鍵＝獸的本招\n巨相撲鬼：四股的震波要跳過或閃過 · 巨掌落下前走開 · 手掌貼地時可以斬\nM 靜音 · V 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
+        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（不按方向＝後跳，按方向＝翻滾；鶴鯉為下降）\n空中按出招＝下突刺 · 閃避尾段按出招＝衝斬 · 被擊飛時按空白＝受身\n化獸（共用下方的墨）：跳躍中再按空白＝鶴 · 閃避中再按 Shift＝虎 · 連按兩下格擋＝鯉 · 化獸時按出招＝變回並出招，格擋鍵＝獸的本招\n巨相撲鬼：穿過霧幕開戰，打完之前出不去 · 斬腳踝扣血，手掌貼地時斬扣雙倍 · 四股的震波和橫掃要跳過，巨掌落下前滾開 · 血量過半它會發怒變快 · 從高處下突刺中頭頂是重擊 · 血量歸零後由一種獸收尾\nM 靜音 · V 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
         if (ms) s += '\n\n' + Object.entries(ms).map(([k, v]) => `${k.padEnd(18)}${v.toFixed(2)} ms`).join('\n');
         if (probeText) s += '\n\n' + probeText;
       }
       hud.textContent = s;
     }
-    { // the ways up show while the giant is there to be climbed
-      const on = giant.awake && giant.alive && giant.mode !== 'rise' && !cine && !ended;
-      hintK += ((on ? 1 : 0) - hintK) * Math.min(1, 4 * DT); hint.style.opacity = hintK.toFixed(3);
-      if (on) {
-        const c = giant.parts?.crown, above = !!c && player.p[1] > c[1] - .5, R = player.ride?.kind, stab = '按出招　刺向頭頂！';
-        const now = f === 1 ? (R === 'head' ? '按出招　刺下！' : R === 'arm' || R === 'leap' ? '沿手臂直上頭頂' : giant.ramp ? '衝向地上的手掌' : '等巨掌拍落地面')
-          : f === 2 ? (above ? stab : '按住空白升高　飛到頭頂上方') : f === 3 ? (player.p[1] > FOG_TOP + 1 ? (above ? stab : '還不夠高') : '游到腳邊　等它踏地') : '';
-        const down = !!giant.ramp;
-        if (f + now + down !== hintKey) {
-          hintKey = f + now + down;
-          ROUTES.forEach(([g, k, how], i) => { // (with the hand lying there and no beast taken yet, the tiger's line speaks up)
-            const el = hint.children[i], act = f === i + 1, call = f === 0 && i === 0 && down;
-            el.textContent = act ? `${g}　${now}` : call ? `${g}　${k}　巨掌已落地　衝上手臂！` : `${g}　${k}　${how}`; el.style.opacity = act || call ? 1 : f === 0 ? (down ? .3 : .66) : .2; el.style.fontSize = act ? '19px' : '';
-          });
-        }
-      }
+    { // the giant's bar: it fills once when the bout begins, and goes when the giant does
+      const on = giant.awake && giant.alive && giant.mode !== 'rise' && !ended, hpK = giant.hp / giant.hpMax;
+      bossK += ((on ? 1 : 0) - bossK) * Math.min(1, (on ? 3 : 1.6) * DT); bossFill = on ? Math.min(1, bossFill + DT / .9) : 0;
+      bossLagV = hpK > bossLagV ? hpK : bossLagV + (hpK - bossLagV) * Math.min(1, (giant.hitT > 0 ? 0 : 2.2) * DT);
+      bossBar.style.opacity = bossK.toFixed(3); const sh = giant.hitT > .25 ? (frame % 2 ? 3 : -3) : 0; bossBar.style.transform = `translateX(-50%) translate(${sh}px, 0)`;
+      bossNow.setAttribute('stroke-dasharray', `${Math.max(hpK * bossFill, .0001)} 1`); bossNow.setAttribute('stroke-opacity', hpK <= 0 ? 0 : 1);
+      bossLag.setAttribute('stroke-dasharray', `${Math.max(bossLagV * bossFill, .0001)} 1`); bossLag.setAttribute('stroke-opacity', bossLagV <= .001 ? 0 : .5);
+      // the band: in, held, out
+      if (bandT >= 0) { bandT += DT; const [a, b, c] = bandKind === 'won' ? [1.2, 4.6, 6.2] : [.9, 2.3, 3.3], k = sm(bandT, .0, a) * (1 - sm(bandT, b, c)); band.style.opacity = k.toFixed(3); band.firstChild.style.transform = `scale(${1 + .06 * bandT / c})`; if (bandT > c) bandT = -1; }
+      // the curtain: all the way round until someone walks in, near them only while the bout lasts, lifting when it is over
+      curtainK += ((giant.alive ? 1 : 0) - curtainK) * Math.min(1, .5 * DT); curtainOpen += ((giant.awake ? 0 : 1) - curtainOpen) * Math.min(1, 1.2 * DT);
+      // (during the bout the camera is often outside it, behind a player whose back is to it: from out there it is not drawn, or the bout would be watched through it)
+      curtainSee += ((giant.awake ? sm(SEAL - arenaDist(eye.x, eye.z), -1, .8) : 1) - curtainSee) * Math.min(1, 6 * DT);
+      curtain.update(t, player.p, curtainOpen, curtainK * curtainSee);
     }
     { // the gauge shows whenever it is not simply full
       const ink = player.ink, beast = f !== 0 && !player.free, low = !beast && ink < SHIFT_MIN, dry = 1 - ink;
@@ -558,11 +579,11 @@ async function boot() {
   window.__bench = async k => { const t0 = performance.now(); for (let i = 0; i < k; i++) { tick(); await device.queue.onSubmittedWorkDone(); } return (performance.now() - t0) / k; };
   window.__state = () => ({ frame, ms, clock, hold, p: player.p, form: player.form, hp: player.hp, combo: player.combo,
     attack: player.actT, dealt, taken, warded, foe: enemy.mode, enemyHp: enemy.hp, enemyIndex: enemy.n, fall: enemy.fallT, melt: enemy.meltT,
-    sound: sound.on, step: player.demoStep, pinned: !!giant.pinned, ride: player.ride?.kind ?? null, stab: player.ride?.stab ?? null, raise: player.raise, hint: hintKey, bossDeath: giant.death, cine: cine?.kind ?? null, ended, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
+    sound: sound.on, step: player.demoStep, pinned: !!giant.pinned, ride: player.ride?.kind ?? null, stab: player.ride?.stab ?? null, raise: player.raise, bossHp: giant.hp, bossMax: giant.hpMax, phase: giant.phase, fin: player.fin?.kind ?? null, band: bandT >= 0 ? bandKind : null, bossDeath: giant.death, cine: cine?.kind ?? null, ended, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
     hero: { ik: hero.ikW, feet: hero.feet.map(f => { const b = hero.B['foot' + f.k].getWorldPosition(tv); return { planted: f.t >= 1, x: b.x, y: b.y, z: b.z }; }) },
     boss: giant.mode, parts: giant.parts, target: giant.target, planted: giant.planted && giant.fall >= 1 && giant.ik >= 1, side: giant.side,
     foot: giant.parts ? ['footL', 'footR'].map(k => giant.parts[k][1] - height(giant.parts[k][0], giant.parts[k][2])) : null });
-  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; hint.style.display = 'none'; } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
+  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
   if (q.has('manual')) { tick(); window.__done = true; return; }
   renderer.setAnimationLoop(tick);
   window.__done = true;

@@ -141,7 +141,7 @@ export class GiantRig {
   update(dt, st, cam) {
     const { B, group: g } = this, T = (b, x = 0, y = 0, z = 0) => { b.t[0] = x; b.t[1] = y; b.t[2] = z; };
     const t = st.time, br = Math.sin(t * 1.15), c = st.crouch, lf = st.lift, sq = st.squat, wd = st.wind, dn = st.down, fl = st.flinch, ro = st.roar, s = st.side;
-    const sw = Math.sin(st.walk), cw = Math.cos(st.walk), wa = st.walkAmt, stomp = st.mode === 'stomp', slam = st.mode === 'slam', sweep = st.mode === 'sweep', dd = st.death ?? 0;
+    const sw = Math.sin(st.walk), cw = Math.cos(st.walk), wa = st.walkAmt, stomp = st.mode === 'stomp', slam = st.mode === 'slam' || st.mode === 'fell', sweep = st.mode === 'sweep', dd = st.death ?? 0;
     for (const b of this.bones) T(b);
     // standing: knees bent and wide apart, arms hanging clear of the body, the head lowered at whoever is down there
     let hipX = .08, hipY = 0, hipZ = .02 * Math.sin(t * .5), chX = .1 + .015 * br, chY = 0, chZ = 0, headX = .25, curl = { L: 1.9, R: 1.9 };

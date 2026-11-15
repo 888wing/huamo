@@ -14,7 +14,7 @@ Open `dist/smoke-procedural.html` (or `dist/index.html` for the photographed smo
 | mouse (click the page first) | look |
 | `Space` | jump: a tap is low, a held press high (climb as crane or carp). Pressed in the air after being thrown: land standing |
 | `Shift` | dodge: a hop back with no direction held, a roll with one (descend as crane or carp) |
-| the same key again | changes form, out of the move: jump again in the air = 鶴 crane, dodge again mid-dodge = 虎 tiger, guard twice quickly = 鯉 carp. All three spend one gauge of ink (the brush stroke at the foot of the screen): 5 s from full, 8 s to refill, a third needed to change. As a beast, attack returns to the sword with a blow (high in the air: the stab downwards) and guard is the beast's own move. |
+| the same key again | changes form, out of the move: jump again in the air = 鶴 crane, dodge again mid-dodge = 虎 tiger, guard twice quickly = 鯉 carp. All three spend one gauge of ink (the brush stroke at the foot of the screen): 5 s from full, 8 s to refill, a third needed to change. As a beast, attack returns to the sword with a blow (high in the air: the stab downwards, which finds the giant's head from above it) and guard is the beast's own move. |
 | `1` `2` `3` `4` | with `?debug` only: set a form directly, no gauge |
 | left mouse or `F` | the form's action. Tap again during each human swing to link a rising slash and an overhead finish. In the air: a stab downwards. Late in a dodge: a cut straight out of it. |
 | right mouse or `Q` | guard (raised just in time: a parry) |
@@ -25,15 +25,14 @@ Open `dist/smoke-procedural.html` (or `dist/index.html` for the photographed smo
 | `M` | mute (sound starts with the first key or click) |
 | `Tab` | help and details |
 
-URL options: `?f32=1` (32-bit float fields), `?n=96,40,96&h=0.25` (box cells and cell size), `?cycles=2` (pressure accuracy), `?dpr=2` (pixel ratio cap, default 1.5), `?demo=climb|wing|gate|pillar|moves|shift|beasts|journey|far|combo|fogwalk|reeds|smokecut|spar|ward|boss|stand|oni|spin|tour|slash|roar|flap|carp`, `?steps=56` (march steps through the 3D fog, default 28), `?arena` (start at the first clearing with normal controls), `?boss` (skip the four shadows and start near the giant).
+URL options: `?f32=1` (32-bit float fields), `?n=96,40,96&h=0.25` (box cells and cell size), `?cycles=2` (pressure accuracy), `?dpr=2` (pixel ratio cap, default 1.5), `?demo=bout|fin|pillar|moves|shift|beasts|journey|far|combo|fogwalk|reeds|smokecut|spar|ward|boss|stand|oni|spin|tour|slash|roar|flap|carp`, `?steps=56` (march steps through the 3D fog, default 28), `?arena` (start at the first clearing with normal controls), `?boss` (skip the four shadows and start just outside the giant's curtain), `?finish=tiger|crane|carp` (choose the beast that ends the bout instead of drawing lots).
 
-The path opens into a clearing for the first duel before heading north through the reeds. Defeat four ink shadows one after another, and the giant (巨相撲鬼) rises at the path's end. Jump or dodge through its shock wave and over its sweeping hand, get out from under the open hand (a ring of ink on the ground shows where), and cut the hand while it lies there: the arm stays down. One stab in the head kills it, and any one beast gets you there (the three lines at the foot of the left edge say how, and the line of the beast in use says what comes next):
+The path opens into a clearing for the first duel before heading north through the reeds. Defeat four ink shadows one after another, and the way to the giant (巨相撲鬼) is open. The bout with it is laid out the way such bouts are in the Souls games:
 
-- **虎 tiger** (dodge, dodge): while the hand lies on the ground, run at it. The tiger takes the arm by itself, bounds from the shoulder onto the head and stands there; press attack and the swordsman rises, lifts the sword and drives it in. Cutting the hand first holds the arm down longer; with the tiger on it the arm does not get up.
-- **鶴 crane** (jump, jump): hold jump to climb above its head, then attack: the stab goes straight to the crown.
-- **鯉 carp** (guard, guard): under the fog beside its foot when it stamps, the carp is thrown high; attack up there.
-
-The stab from the air finds the head from anywhere above it and within nine metres. As the tiger you can also run up the rock at the clearing's edge and leap from its top.
+- **Entrance.** A curtain of fog hangs round its clearing. Walk in through it and the giant rises: a staged camera, its name, wooden clappers, and then its health as one long red stroke along the foot of the picture, with a drum under the bout. The curtain lets no one out until it is over.
+- **The bout.** Cuts at its ankles take its health; cuts on its hand while the hand lies on the ground take twice as much (the first of them holds the arm down longer). Jump its shock rings and its sweeping hand, roll out from under the open hand (a ring of ink on the ground shows where). The stab downwards from the air onto its head is a heavy blow: the crane can get above it, and so can the carp, thrown up by a stamp from under the fog beside its foot. At half its health it rears and bellows (a ring: jump it) and is faster from then on, and its stamps come in pairs.
+- **Cut down**, the swordsman gathers again inside the curtain (the band reads 墨盡) and the giant stands whole on its mark: the bout starts over without the entrance.
+- **The end.** When its health is gone it goes down on one hand, and the end is played for you: one of the three beasts, by lot, carries the sword to its head (the tiger up the arm, the crane over it, the carp thrown clear of the fog), the sword goes in, it falls and runs out into ink, the band reads 伏誅, the curtain lifts.
 
 ## Build
 
@@ -66,8 +65,8 @@ node tools/bench.mjs [page]      # whole-frame cost at 720p and 1080p
 node tools/check-spar.mjs spar   # the four shadows; `ward` = defence only; `journey 110` = shadows, then the giant
 node tools/check-moves.mjs       # the swordsman's motion: foot slide, dodge distances, jump heights, recovery times
 node tools/check-sound.mjs       # renders every voice offline: peak, loudness, length; then plays a whole kill with audio running
-node tools/check-climb.mjs climb # the kill by the tiger alone; `wing` = the crane alone, `gate` = the carp alone, `pillar` = by the rock
-node tools/trace.mjs climb 24 6  # what the giant and the player are doing, line by line (demo, seconds, from second)
+node tools/check-bout.mjs bout 150 tiger  # the whole bout: when it turned, when it was beaten, the end; `fin 45 carp` = the giant one cut from beaten; `stand 70` = a player who does not defend
+node tools/trace.mjs bout 30 6    # what the giant and the player are doing, line by line (demo, seconds, from second)
 node tools/check-shift.mjs       # changing form: how long a gauge lasts, how fast it refills, speed across the change
 tools/strip.sh moves roll 16.9 17.8 4   # a close-up strip of one stretch of a demo (start s, end s, frames between shots)
 node tools/check-boss.mjs 60     # the giant: mode sequence, where its hand lands, feet on the ground; `60 stand` = a player who does not defend

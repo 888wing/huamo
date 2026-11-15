@@ -90,6 +90,7 @@ export class Player {
     this.events = [];                                                      // what the caller turns into fog, shake and sound: jump, land, plunge, down
     this.ink = 1; this.free = false;                                       // free: a form set directly (demos, debug keys) does not drain
     this.morphT = 0; this.morphFrom = 0; this.guardTap = 9; this.guardWas = false;
+    this.fin = null;                                                       // the end of the bout being played: { kind: 'tiger' | 'crane' | 'carp', ... }
     this.ride = null; this.raise = 0; this.homing = false;                 // carried: { kind: 'arm' | 'leap' | 'head' | 'rock', ... }; raise: the sword lifted for the last blow
   }
   // Carried by something. The tiger's way up the giant, in four plain beats: it gathers itself on the lying hand, runs
@@ -147,6 +148,46 @@ export class Player {
     moveTo([cx + R.rx * (r + .3), R.y, cz + R.rz * (r + .3)]);
     return true;
   }
+  // The end of the bout, played for the player. Beaten, the giant is down on one hand, and one of the three beasts
+  // carries the sword to its head: the tiger up the arm, the crane over it, the carp thrown clear of the fog. Input is
+  // set aside; what follows is what a player would have pressed.
+  finish(kind) {
+    this.fin = { kind, t: 0, stage: 0, s: 0 }; this.act = 0; this.clearCombo(); this.guard = false; this.dodge = 0; this.ko = 0; this.koT = 0; this.stagger = 0; this.hurtT = 0; this.plunge = 0; this.land = 0;
+  }
+  become(f) { const from = this.form; if (from === f) return; this.morphFrom = from; this.morphT = MORPH; this.form = f; this.free = true; this.act = 0; this.events.push({ kind: 'shift', to: f, from, at: [...this.p] }); }
+  // returns the input and the heading for this step of it
+  direct(dt, foe) {
+    const F = this.fin, g = this.boss, P = g?.parts, { p, v } = this, inp = { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false }, cam = { yaw: this.yaw, pitch: 0 };
+    F.t += dt;
+    if (!g?.alive) { this.fin = null; return [inp, cam]; }                 // the sword is in: the rest is the giant's
+    if (!P || F.t < .75) return [inp, cam];                                // a breath while it goes down
+    if (F.t > 9 && !this.ride) { this.plunge = 0; this.form = 0; this.free = false; this.ride = { kind: 'head', t: 0, stab: 0, slope: 0 }; }   // (it went wrong somewhere: the end is not left hanging)
+    const c = P.crown, to = q => { cam.yaw = Math.atan2(q[0] - p[0], q[2] - p[2]); return Math.hypot(q[0] - p[0], q[2] - p[2]); };
+    if (F.kind === 'tiger') {
+      if (F.stage === 0) { this.become(1); F.stage = 1; }
+      const ramp = g.ramp;
+      if (this.ride?.kind === 'head') { F.s += dt; inp.act = F.s > .45; }  // on its head: a breath, then the blow
+      else if (!this.ride && ramp) { to(ramp[0]); inp.z = 1; if (F.t > 4.5 && this.form === 1) this.ride = { kind: 'arm', s: 0, wait: .3, slope: 0 }; }   // (something in the way: it is on the hand anyway)
+    } else if (F.kind === 'crane') {
+      if (F.stage === 0) { this.become(2); v[1] = Math.max(v[1], 6); this.ground = false; this.airT = .2; F.stage = 1; }
+      if (F.stage === 1) {
+        const hd = to(c); inp.z = Math.min(1, hd * .5); inp.up = p[1] < c[1] + 2.6 ? 1 : 0;
+        if ((hd < 1.6 && p[1] > c[1] + 1.8) || F.t > 6) { F.stage = 2; this.revert(true, foe); }   // over its head: the stab
+      }
+    } else {
+      if (F.stage === 0) { this.become(3); F.stage = 1; F.s = 0; }
+      // under the fog, out to just beyond where its hand came down (clear of the body bowed over it); the fog thrown up there throws the carp clear
+      const h = g.ramp?.[0], ox = h ? h[0] - g.p[0] : 0, oz = h ? h[2] - g.p[2] : 0, ol = Math.hypot(ox, oz) || 1, spot = h ? [h[0] + ox / ol * 2.2, 0, h[2] + oz / ol * 2.2] : c, hd = to(F.stage === 1 ? spot : c);
+      if (F.stage === 1) {
+        F.s += dt; inp.z = hd > .8 ? 1 : 0; inp.down = 1;
+        if ((h && hd <= 1) || F.s > 2.6) { F.stage = 2; p[1] = FOG_TOP - .29; v[1] = Math.sqrt(44 * Math.max(4, c[1] + 3.2 - p[1])); this.ground = false; this.airT = .2; this.events.push({ kind: 'breach', at: [...p], big: true }); }
+      } else if (F.stage === 2) {
+        inp.z = Math.min(1, hd * .5);
+        if ((p[1] > c[1] + 1 && v[1] < 3) || F.t > 7) { F.stage = 3; this.revert(true, foe); }      // at the top of the leap: the stab
+      }
+    }
+    return [inp, cam];
+  }
   // Into a beast, out of the move in progress. The body keeps the speed it had.
   shift(f) {
     if (this.ink < SHIFT_MIN || f === this.form || this.morphT > 0) return false;
@@ -180,7 +221,7 @@ export class Player {
   // untouchable: inside a dodge's window, while getting up, while changing form
   get invuln() {
     const e = this.dodgeDur - this.dodge, w = this.dodgeKind === 1 ? HOP : ROLL;
-    return (this.dodge > 0 && (this.dodgeKind === 3 || (e > w[2] && e < w[3]))) || this.ko >= 2 || this.burst > 0 || this.fallen > 0 || this.morphT > 0 || !!this.ride || !!this.staged;
+    return (this.dodge > 0 && (this.dodgeKind === 3 || (e > w[2] && e < w[3]))) || this.ko >= 2 || this.burst > 0 || this.fallen > 0 || this.morphT > 0 || !!this.ride || !!this.staged || !!this.fin;
   }
   // A blow lands. kind: 1 a cut (a flinch), 2 a heavy blow (a stumble), 3 thrown off the feet. Returns true if it kills.
   hurt(kind, from, power, back) {
@@ -226,6 +267,7 @@ export class Player {
 
   // inp: { x, z (-1..1 move), up, down, act }, cam: { yaw, pitch }, foe: position of an enemy to face when striking, or null
   update(dt, inp, cam, foe) {
+    if (this.fin) [inp, cam] = this.direct(dt, foe);
     const { p, v } = this, f = this.form;
     const pressed = !!inp.act && !this.attackHeld, jumpPressed = !!inp.up && !this.jumpHeld, dodgePressed = !!inp.dodge && !this.dodgeWas;
     this.attackHeld = !!inp.act; this.jumpHeld = !!inp.up; this.dodgeWas = !!inp.dodge;
@@ -254,7 +296,7 @@ export class Player {
     if (this.ride && this.riding(dt, jumpPressed, pressed)) { this.t += dt; this.act = 0; this.dodge = 0; return; }
     if (f === 1 && this.ground && !this.ride) { // the tiger takes to anything it can run up
       const ramp = this.boss?.ramp;
-      if (ramp && Math.hypot(p[0] - ramp[0][0], p[2] - ramp[0][2]) < 3.1) { this.ride = { kind: 'arm', s: 0, wait: .3, slope: 0 }; this.events.push({ kind: 'mount', at: [...p] }); }
+      if (ramp && this.fin && Math.hypot(p[0] - ramp[0][0], p[2] - ramp[0][2]) < 3.1) { /* its arm is a way up only once it is beaten */ this.ride = { kind: 'arm', s: 0, wait: .3, slope: 0 }; this.events.push({ kind: 'mount', at: [...p] }); }
       else PILLARS.forEach(([cx, cz, r, top], i) => {
         const dx = p[0] - cx, dz = p[2] - cz, d = Math.hypot(dx, dz);
         if (!this.ride && d < r + .9 && p[1] < top - 1.5 && (inp.x || inp.z) && Math.sin(this.yaw) * -dx + Math.cos(this.yaw) * -dz > .6 * d) { this.ride = { kind: 'rock', i, y: p[1], rx: dx / d, rz: dz / d, slope: 1.4 }; this.events.push({ kind: 'mount', at: [...p] }); }
@@ -328,7 +370,13 @@ export class Player {
         v[0] = dx / m * sp; v[1] = ty / m * sp; v[2] = dz / m * sp; if (d > .5) this.yaw = Math.atan2(dx, dz);
       }
       if (this.morphT <= 0 && ((this.homing && l < 1.4) || (d < 1.9 && p[1] <= c[1] + .3 && p[1] > c[1] - 2.5))) {
-        this.homing = false; this.ride = { kind: 'head', t: 0, stab: 1, slope: 0 }; this.plunge = 2; this.plungeT = 0; v.fill(0); this.events.push({ kind: 'headstab', at: [...c] }); this.boss.die();
+        this.homing = false;
+        if (!this.fin) { // it still has fight in it: a heavy blow, and the swordsman springs clear of it
+          const res = this.boss.headHit(), ox = p[0] - this.boss.p[0], oz = p[2] - this.boss.p[2], ol = Math.hypot(ox, oz) || 1;
+          this.plunge = 0; this.hop = false; this.airT = .2; v[0] = ox / ol * 7; v[1] = 8; v[2] = oz / ol * 7; this.events.push({ kind: 'headhit', at: [...c], res });
+          this.t += dt; return;
+        }
+        this.ride = { kind: 'head', t: 0, stab: 1, slope: 0 }; this.plunge = 2; this.plungeT = 0; v.fill(0); this.events.push({ kind: 'headstab', at: [...c] }); this.boss.die();
         this.t += dt; return;
       }
     }

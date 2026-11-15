@@ -610,6 +610,70 @@ journey, sound) pass as before. Whole frame 8.3 / 11.1 ms at 720p / 1080p, uncha
 Not verified: none of it was played by hand; the hint lines were read only at 1280 px wide (at 640 px they run under
 the ink gauge); how the timing of the tiger's window (2.2 s to reach the hand) feels with real hands.
 
+## Round 28 (2026-11-15): the bout laid out as the Souls games lay theirs out
+
+The owner: look at how the Souls games design entrance, fight and ending; the beast finish belongs only in a random
+cut scene after the fight is won. So round 27's "any beast can climb and kill at any time" is withdrawn. The giant has
+health now and has to be beaten; then one beast, by lot, ends it.
+
+**Entrance.** `buildCurtain` (`combat-fx.js`): a strip 9 m tall along `arenaEdge()` (`world.js`, a capsule `SEAL` =
+8.5 m round the line home-gate), drawn as hanging threads of paper-white. It writes depth where it is thick; without
+that the compositor laid the haze of distance over it and it could not be told from the mist. Walking in through it
+wakes the giant (`arenaDist < SEAL`); `arenaKeep` holds the player inside while the giant lives; it lifts when it dies.
+The entrance camera and name are unchanged. New: the bar (`bossBar`: name and one red stroke along the foot of the
+picture, a grey stroke behind it for what the last blows took), wooden clappers (`clacks`), a drum under the bout
+(`sound.frame(..., drive)`: a slow figure, a faster one in the second half, silent otherwise).
+
+**The bout.** `Giant.hp` (24). `struck()` now deals damage: an ankle takes the stroke's `power` (1, 1, 2), the lying
+hand twice that, `headHit()` 6 (the stab from the air onto the head: `Player` springs clear instead of staying on).
+`damage()` returns `hit`, `rage` or `fell`. At half: mode `rage` (it rears and bellows, a ring goes out, 怒 is stamped),
+then `rate` 1.22 on everything it does and stamps in pairs. Never the same move three times running; underfoot it no
+longer only stamps. The tiger does not take the arm during the bout (`ramp` mount needs `player.fin`).
+Cut down: the band reads 墨盡, the swordsman gathers again at `home` inside the curtain, `Giant.reset()` puts the
+giant whole on its mark, no entrance.
+
+**The end.** Health gone: mode `fell` (down on the hand nearer the player, the slam's pose held). `main.js` draws a
+lot among `tiger`, `crane`, `carp` (`?finish=` chooses) and calls `Player.finish(kind)`: `direct()` replaces input with
+what a player would have pressed (`become()`, steer, press), so the finisher runs through the same code as play: the
+tiger's ride of round 27, the crane's climb and homing stab, the carp swum out past the hand and thrown clear. Bars
+on, the staged camera of round 27, then the existing kill camera, death, and the band 伏誅 in place of the full-screen
+end card; `R` restarts. A safety net ends it on the head after 9 s if the script is ever stuck.
+
+Removed with round 27's routes: demos `climb`, `wing`, `gate`, `tools/check-climb.mjs` and the three hint lines. In their
+place: demos `bout` (the whole bout), `fin` (the giant one cut from beaten), `stand` (no defence), and
+`tools/check-bout.mjs`. `pillar` stays as the demo of the stab onto the head.
+
+Found on the way:
+- The carp's finish hung: thrown up from under the bowed body it was held down by the body's collision spheres. It
+  now surfaces 2.2 m beyond the hand, and those spheres are skipped for it.
+- `querySelector('div > div')` on an element matches that element's own child div against the element itself as
+  parent: setting its text wiped the span beside it. Use `firstChild` / `lastChild`.
+- A comment after `{` on a one-line `if` swallowed the rest of the line.
+
+Measured, scripted (`tools/check-bout.mjs`, procedural build; the scripted player cuts ankles, cuts the lying hand,
+jumps rings and the sweep, rolls out from under the hand):
+
+| run | result |
+|---|---|
+| `bout 150 carp` | in through the curtain 0.5 s, bout begins 3.7 s, turns 28.1 s into the fighting, beaten after 42.1 s, the carp's end 3.3 s, dead 55.7 s, band 56.2 s; 3 blows taken (two paired stamps, the bellow's ring), health 2 of 5 left |
+| `bout 150 crane` | the same bout; the crane's end 2.9 s |
+| `fin 45 tiger / crane / carp` | from beaten to the sword in its head 4.9 / 3.4 / 3.6 s |
+| `stand 70` (no defence) | cut down three times in 70 s; each time the band, the return and the giant whole again; no errors |
+| `journey 200` | four shadows, then the giant dying at about 80 s and dead by 90 s: the whole slice start to finish |
+| `trace pillar` | the stab onto its head from the rock: 24 -> 18 |
+
+`check-sound.mjs`: 27 voices, none flagged (taiko peak 0.61, clack 0.53), the kill plays through to the end card with
+audio running. `check-moves` and `check-shift` as before. Sizes: `dist/smoke-procedural.html` **304.6 KB gzip**,
+`dist/index.html` 400.0 KB gzip.
+
+During the bout the curtain is not drawn while the camera is outside it (it writes depth, and a player with their back
+to it would be watched through its threads). Keeping the camera inside instead was tried and dropped: the clearing is
+smaller than the camera's boom, so the view was squeezed to overhead most of the time.
+
+Not verified: nothing was played by hand, so the difficulty is unknown (the numbers come from a script that takes
+three blows in 42 s); none of the new sounds were listened to; the photo build ran only `fin` after the last change;
+frame cost was not measured again (one more transparent strip and three DOM elements were added).
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).
@@ -719,6 +783,9 @@ Phenomena, checked in slice views (`out/validate.png`, `out/v_carp2.png`):
   suspect.
 - Solver A: no vortex street behind the carp at 0.25 m cells.
 - The simulation takes one fixed 1/60 s step per rendered frame, so it slows down if the frame rate drops.
+- After the giant falls, what is left of the curtain shows for a few seconds as a long grey bar while it fades.
+- The scripted player in `bout` is hit by the bellow's ring and by paired stamps; that is the script, but nobody has
+  checked by hand that a person can read them in time.
 - The giant's feet slide a little when the pose changes; skirt strips pass through a raised leg; nothing collides
   with bushes. Standing on its head, the swordsman's feet are set on the crown's point, not on the skull's surface.
 - Not tested: Safari, Firefox, Windows, any phone, a real interactive play session (all checks were scripted runs in

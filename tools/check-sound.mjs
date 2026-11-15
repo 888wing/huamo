@@ -13,7 +13,7 @@ for (const n of names) { const r = await page.evaluate(k => window.__sound(k), n
 console.log(`${names.length} voices, ${bad} flagged`);
 // and live: a key press starts the audio, then the kill by the arm is played through with every sound it sets off
 const live = await browser.newPage(); live.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 300)); }); live.on('pageerror', e => errs.push(e.message));
-await live.goto('file://' + resolve(process.env.PAGE ?? 'dist/smoke-procedural.html') + '?manual&dpr=1&boss&demo=climb');
+await live.goto('file://' + resolve(process.env.PAGE ?? 'dist/smoke-procedural.html') + '?manual&dpr=1&boss&demo=fin&finish=tiger');
 await live.waitForFunction('window.__done === true', { timeout: 60000 }); await live.keyboard.press('KeyZ');
 await live.evaluate(() => window.__advance(60 * 26)); const st = await live.evaluate(() => window.__state());
 console.log(`live: audio running ${st.sound}, the kill played through to "${st.boss}"${st.ended ? ', end card up' : ''}`); console.log('errors:', errs.length ? errs : 'none');

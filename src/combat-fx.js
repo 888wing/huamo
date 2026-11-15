@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { length, max, mix, mrt, positionWorld, smoothstep, texture3D, uniform, uv } from 'three/tsl';
+import { float, length, max, mix, mrt, positionWorld, smoothstep, texture3D, uniform, uv, vec3 } from 'three/tsl';
 import { height } from './world.js';
 import { wash } from './stage.js';
 
@@ -88,5 +88,34 @@ export function buildBlot(scene, noise) {
       for (let i = 0; i < position.count; i++) { const x = at[0] + (coords.getX(i) - .5) * 2 * radius * 1.12, z = at[2] + (coords.getY(i) - .5) * 2 * radius * 1.12; position.setXYZ(i, x, height(x, z) + .04, z); }
       position.needsUpdate = true;
     },
+  };
+}
+
+// The curtain of fog round the giant's clearing: a tall strip along a closed line on the ground, drawn as slow rising
+// wisps of paper-white. Before the bout it stands all the way round; once someone is inside, it shows only near them.
+export function buildCurtain(scene, noise, line) {
+  const n = line.length, pos = new Float32Array(n * 6), uvs = new Float32Array(n * 4), idx = [];
+  for (let i = 0, s = 0; i < n; i++) {
+    const [x, z] = line[i]; if (i) s += Math.hypot(x - line[i - 1][0], z - line[i - 1][1]);
+    const y = height(x, z); pos.set([x, y - .6, z, x, y + 8.5, z], i * 6); uvs.set([s, 0, s, 1], i * 4);
+    if (i) idx.push(2 * i - 2, 2 * i - 1, 2 * i, 2 * i, 2 * i - 1, 2 * i + 1);
+  }
+  const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2)); geometry.setIndex(idx);
+  const time = uniform(0), hero = uniform(new THREE.Vector3()), open = uniform(1), strength = uniform(1);
+  // (it writes depth where it is thick, so the haze of distance is not laid over it as if it were not there, and the
+  // brush finds its edges like any other body's)
+  const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: true, alphaTest: .34, side: THREE.DoubleSide });
+  const q = positionWorld.mul(vec3(.085, .05, .085)).add(vec3(0, time.mul(-.035), time.mul(.012))), a = texture3D(noise, q).r, b = texture3D(noise, q.mul(2.7).add(vec3(.3, time.mul(-.05), 0))).g;
+  // long threads hanging in it, drifting down: what makes it a curtain and not more of the same mist
+  const thread = texture3D(noise, vec3(uv().x.mul(.42), uv().y.mul(.55).add(time.mul(.045)), time.mul(.008))).r;
+  const wisp = smoothstep(.28, .72, a.mul(.7).add(b.mul(.42))), v = uv().y, fade = smoothstep(1, .25, v).mul(smoothstep(0, .05, v));
+  const near = smoothstep(10, 3, length(positionWorld.xz.sub(hero.xz)));
+  material.opacityNode = wisp.mul(.45).add(.5).mul(fade).mul(mix(near, 1, open)).mul(strength);
+  material.colorNode = wash(mix(.62, 1, smoothstep(.3, .62, thread)).mul(mix(.9, 1, b)));
+  material.mrtNode = mrt({ subjectMask: float(0) });
+  const mesh = new THREE.Mesh(geometry, material); mesh.frustumCulled = false; mesh.renderOrder = 5; scene.add(mesh);
+  return {
+    // t: seconds; at: where the player is; standing: 1 all the way round, 0 only near the player; k: 0 gone .. 1 there
+    update(t, at, standing, k) { time.value = t; hero.value.set(at[0], at[1], at[2]); open.value = standing; strength.value = k; mesh.visible = k > .01; },
   };
 }

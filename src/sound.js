@@ -56,13 +56,18 @@ export const VOICES = {
   groar: (c, o, t) => { for (const [f, d] of [[62, 0], [93, .012], [124.5, .02]]) tone(c, o, t + d, { dur: 1.5, f0: f, f1: f * .7, type: 'sawtooth', gain: .2, a: .15 }); hiss(c, o, t, { dur: 1.5, f0: 420, f1: 250, q: 1.6, gain: .5, a: .15 }); },
   rumble: (c, o, t) => { hiss(c, o, t, { dur: 2.6, f0: 70, f1: 130, type: 'lowpass', gain: .7, a: .8 }); tone(c, o, t, { dur: 2.6, f0: 31, f1: 38, gain: .5, a: .8 }); },
   stab: (c, o, t) => { tone(c, o, t, { dur: .55, f0: 320, f1: 38, gain: .6, a: .002 }); ring(c, o, t, .1, .9); hiss(c, o, t, { dur: .5, f0: 3000, f1: 300, gain: .4 }); },
+  // the bout's drum, its rim, and the wooden clappers that call a bout: slow, then running together
+  taiko: (c, o, t, { k = 1 }) => { tone(c, o, t, { dur: .34, f0: 98, f1: 44, gain: .6 * k, a: .002 }); hiss(c, o, t, { dur: .09, f0: 330, type: 'lowpass', gain: .3 * k, a: .001 }); hiss(c, o, t, { dur: .02, f0: 1500, gain: .3 * k, a: .001 }); },
+  rim: (c, o, t, { k = 1 }) => { tone(c, o, t, { dur: .035, f0: 880, f1: 640, type: 'triangle', gain: .22 * k, a: .001 }); hiss(c, o, t, { dur: .025, f0: 3200, q: 1.5, gain: .3 * k, a: .001 }); },
+  clack: (c, o, t, { k = 1 }) => { tone(c, o, t, { dur: .06, f0: 1480, f1: 1300, type: 'square', gain: .1 * k, a: .001 }); tone(c, o, t, { dur: .05, f0: 2350, gain: .1 * k, a: .001 }); hiss(c, o, t, { dur: .02, f0: 4200, type: 'highpass', gain: .4 * k, a: .001 }); },
+  clacks: (c, o, t) => { for (let i = 0, at = 0, gap = .5; i < 10; i++) { VOICES.clack(c, o, t + at, { k: .7 + .04 * i }); at += gap; gap = Math.max(.07, gap * .72); } },
   pluck: (c, o, t, { f = 146.83, g = .2 }) => pluck(c, o, t, f, g),
   end: (c, o, t) => { [146.83, 220, 293.66].forEach((f, i) => pluck(c, o, t + i * .32, f, .26)); },
 };
 const SCALE = [146.83, 174.61, 196, 220, 261.63, 293.66]; // a few notes of a pentatonic scale, low
 
 export function createSound(muted = false) {
-  let ctx = null, out = null, bed = null, bedF = null, wait = 4, n = 0;
+  let ctx = null, out = null, bed = null, bedF = null, wait = 4, n = 0, beat = 0, step = 0;
   const start = () => {
     if (muted) return; if (ctx) { ctx.resume(); return; }
     ctx = new AudioContext(); const master = ctx.createGain(), comp = ctx.createDynamicsCompressor(), verb = ctx.createConvolver(), send = ctx.createGain();
@@ -79,11 +84,15 @@ export function createSound(muted = false) {
     get on() { return !!ctx && ctx.state === 'running'; },
     toggle() { muted = !muted; if (muted) ctx?.suspend(); else start(); return !muted; },
     play(name, o = {}) { if (ctx && ctx.state === 'running' && VOICES[name]) VOICES[name](ctx, out, ctx.currentTime + .005, o); },
-    // every frame: speed 0..1 of whatever the player is, and whether the giant is up (the plucked notes stop for it)
-    frame(dt, speed, tense) {
+    // every frame: speed 0..1 of whatever the player is, whether the giant is up (the plucked notes stop for it), and
+    // the bout's drum: 0 silent, 1 a slow figure, 2 faster and fuller once the giant is enraged
+    frame(dt, speed, tense, drive = 0) {
       if (!ctx || ctx.state !== 'running') return; const t = ctx.currentTime;
       bed.gain.setTargetAtTime(.018 + .05 * speed, t, .3); bedF.frequency.setTargetAtTime(340 + 500 * speed, t, .4);
       if ((wait -= dt) <= 0 && !tense) { wait = 5 + ((n * 7919) % 6); VOICES.pluck(ctx, out, t + .01, { f: SCALE[(n * 5 + (n >> 1)) % SCALE.length], g: .12 }); n++; }
+      if (!drive) { beat = 0; step = 0; return; }
+      const fig = drive > 1 ? [1, 0, .5, 1, 0, .5, 1, .5] : [1, 0, 0, .5, 0, 0, 1, 0];
+      if ((beat -= dt) <= 0) { beat += drive > 1 ? .2 : .29; const k = fig[step % 8]; if (k) VOICES.taiko(ctx, out, t + .01, { k: .5 * k + .12 }); if (step % 4 === 2) VOICES.rim(ctx, out, t + .01, { k: drive > 1 ? .7 : .45 }); step++; }
     },
   };
 }

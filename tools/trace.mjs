@@ -9,7 +9,7 @@ const page = await browser.newPage(); page.on('pageerror', e => console.log('ERR
 await page.goto('file://' + resolve(process.env.PAGE ?? 'dist/smoke-procedural.html') + '?manual&dpr=1&boss&demo=' + demo + extra);
 await page.waitForFunction('window.__done === true', { timeout: 60000 });
 const S = await page.evaluate(async (n, every) => { const out = []; for (let i = 0; i < n; i++) { await window.__advance(every); const s = window.__state(), c = s.parts?.crown;
-  out.push([(s.frame / 60).toFixed(2), s.boss, 'form' + s.form, s.ride ?? '-', 'hp' + s.hp, 'ink' + s.ink.toFixed(2), 'dodge' + Math.max(0, s.dodge).toFixed(2), 'ko' + s.ko, 'plunge' + s.plunge, 'y' + s.p[1].toFixed(1),
+  out.push([(s.frame / 60).toFixed(2), s.boss, `${s.bossHp}/${s.bossMax}`, 'form' + s.form, s.ride ?? '-', 'hp' + s.hp, 'ink' + s.ink.toFixed(2), 'dodge' + Math.max(0, s.dodge).toFixed(2), 'ko' + s.ko, 'plunge' + s.plunge, 'y' + s.p[1].toFixed(1),
     c ? 'crown y' + c[1].toFixed(1) + ' away ' + Math.hypot(c[0] - s.p[0], c[2] - s.p[2]).toFixed(1) : '', s.planted ? 'hand down' : '', s.ground ? 'ground' : 'air'].join(' ')); } return out; }, Math.round(secs * 60 / every), every);
 console.log(S.filter(l => +l.split(' ')[0] >= from).join('\n'));
 await browser.close();
