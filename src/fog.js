@@ -1,14 +1,14 @@
 // The picture: fog and ink marched at half resolution, then one full-resolution pass that draws brush lines at
 // depth edges, lets distance wash things towards paper, lays the fog over, and finishes on textured paper.
 import * as THREE from 'three/webgpu';
-import { Fn, vec2, vec3, vec4, float, uniform, texture3D, screenUV, screenCoordinate, screenSize, pass, rtt, Loop, If, Break,
+import { Fn, vec2, vec3, vec4, float, uniform, texture, texture3D, screenUV, screenCoordinate, screenSize, pass, rtt, Loop, If, Break,
   getViewPosition, perspectiveDepthToViewZ, interleavedGradientNoise, exp, max, min, length, mix, smoothstep, clamp, abs, floor, fract, dot } from 'three/tsl';
 import { PAPER, INK } from './stage.js';
 import { FOG_TOP } from './world.js';
 
 const STEPS = 56, ZREF = 140;
 
-export function createFog(renderer, scene, camera, noise, den, strokes, vel) {
+export function createFog(renderer, scene, camera, noise, den, strokes, vel, veils = []) {
   const scenePass = pass(scene, camera), strokeT = pass(strokes, camera).getTextureNode('output');
   const colT = scenePass.getTextureNode('output'), depT = scenePass.getTextureNode('depth');
   // fog is thin veils, not a wall (kFog): the scene shows through and the fog's own movement becomes visible
@@ -119,6 +119,14 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel) {
     const near = (c, r) => float(1).sub(smoothstep(r.mul(.55), r, length(wp.sub(c).mul(vec3(1, .75, 1))))).mul(smoothstep(-.88, -.6, wp.y.sub(c.y)));
     const keep = max(near(u.hero, u.heroR), near(u.hero2, float(1.35))).mul(.8);
     col.assign(col.mul(mix(fg.z, 1, keep)).add(u.paper.mul(fg.x.mul(keep.oneMinus()))).add(u.ink.mul(fg.y)));
+
+    // the smoke layers, far to near: each is laid over whatever lies beyond its distance, so smoke passes both behind
+    // and in front of things. A second tap towards the light shades each layer: thick smoke up-light puts this texel in shadow.
+    for (const L of [...veils].reverse()) {
+      const s = texture(L.tex, uv).level(0), lit = texture(L.tex, uv.add(vec2(-.012, -.02))).level(0);
+      const a = float(1).sub(exp(s.z.mul(-L.k))).mul(smoothstep(L.d, L.d + 1.4, z));
+      col.assign(mix(col, u.paper.mul(clamp(float(1.04).sub(lit.z.sub(s.z.mul(.6)).mul(.8)), .52, 1.06)).mul(L.tone), a));
+    }
 
     // the sword stroke goes on last, over the fog
     col.assign(mix(col, u.ink, strokeT.r.mul(.94).mul(keep.mul(1.25).oneMinus())));

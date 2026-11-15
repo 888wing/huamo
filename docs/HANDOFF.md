@@ -135,6 +135,23 @@ response to the stroke is faint in stills** — not yet judged in motion. Knobs:
 `mix(.55, 1.08, lit)` in `fog.js`; ground tone in `terrainMaterial` (`stage.js`); blade push in `bladeEmitters`
 (`player.js`). Scripted fight still runs clean.
 
+## Round 9 (2026-11-15): layered 2D smoke — the owner's new approach
+
+Owner: nothing so far gives a real smoke effect; change the method. Put 4-5 flat fluid-simulation layers in the
+picture at different depths, at least one between the character and the camera; when the player moves, every layer
+computes its fluid response in real time; each layer is smoke on a transparent background with its own parameters.
+
+Built: `src/veil.wgsl` + `src/veil.js`. Five camera-facing layers at 2.6, 4.6, 8, 12 and 18 m from the camera (the
+first two are in front of the figure). Each is a 384 x 216 2D incompressible fluid (advect, 16 Jacobi sweeps,
+project) with its own opacity, tone and amount of smoke. Smoke gathers below 3.6 m world altitude in drifting clumps
+and billows under a slow shearing flow. Camera motion scrolls each layer by its own parallax. The player, both
+blades and the enemy are projected into every layer and push it, weighted by how close their depth is to the
+layer's. `fog.js` lays the layers over the scene far to near, each only over what lies beyond its distance, with a
+second tap towards the light for shading. The blade emits no ink.
+
+The 3D solver still runs underneath as a thin ground mist. Stills of `?demo=slash` show soft white billows in front
+of and behind the figure. Whether a stroke visibly parts them was not judged in motion.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

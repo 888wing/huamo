@@ -8,6 +8,7 @@ import { buildBeasts } from './beasts.js';
 import { createFog } from './fog.js';
 import { Player, Enemy, spar, FORMS, HP } from './player.js';
 import { Figure } from './figure.js';
+import { Veil, VW, VH } from './veil.js';
 import { DEMOS } from './demos.js';
 
 const q = new URLSearchParams(location.search);
@@ -37,7 +38,13 @@ async function boot() {
   const shade = new Figure(scene, noise, { robe: .2, cloak: .02, legs: .06, hat: .1, skin: .3, wraps: .16 });
   const enemy = new Enemy(), fx = [], splash = buildSplash(trail.scene);
   let dealt = 0, taken = 0, warded = 0;
-  const fog = createFog(renderer, scene, camera, noise, external(sim.D0), trail.scene, external(sim.V0));
+  // five layers of smoke between 2.6 and 18 m from the camera; the first two lie between the camera and the figure
+  const veils = await Promise.all([[2.6, 1.5, 1, .4], [4.6, 1.9, 1, .55], [8, 2.4, .98, .9], [12, 2.8, .95, 1], [18, 3.0, .91, 1]].map(([d, k, tone, amount], i) => Veil.create(gpu, i, { d, k, tone, amount })));
+  veils.forEach(v => { v.tex = external(v.A); });
+  const fog = createFog(renderer, scene, camera, noise, external(sim.D0), trail.scene, external(sim.V0), veils);
+  const prevPos = new THREE.Vector3(), prevFwd = new THREE.Vector3(0, 0, -1), tv = new THREE.Vector3(), fwd = new THREE.Vector3();
+  // world point -> [x, y] in layer texels and distance along the view
+  const toLayer = (x, y, z) => { tv.set(x, y, z).applyMatrix4(camera.matrixWorldInverse); const dist = -tv.z; tv.applyMatrix4(camera.projectionMatrix); return [(tv.x * .5 + .5) * VW, (1 - (tv.y * .5 + .5)) * VH, dist]; };
   fog.u.boxSize.value.set(n[0] * h, n[1] * h, n[2] * h); fog.u.top.value = sim.org[1] + n[1] * h;
   let view = q.get('view') ?? 'fog';
   fog.use(view);
@@ -141,6 +148,28 @@ async function boot() {
     camera.position.x += Math.sin(t * 61) * shake * .12; camera.position.y += Math.sin(t * 47 + 1) * shake * .12;
     camera.lookAt(tgt);
     camera.updateMatrixWorld();
+    // ---- smoke layers: what moved this frame pushes each layer, more the closer its depth is to that layer's
+    const stir = [{ p: [player.p[0], player.p[1] + 1, player.p[2]], v: player.v, r: .9, drag: 9 }];
+    if (bl) for (const k of [.15, .5, .85]) stir.push({ p: [0, 1, 2].map(a => bl.a[a] + (bl.b[a] - bl.a[a]) * k), v: bl.vel, r: bl.snap ? 1.4 : .8, drag: bl.snap ? 70 : 10 });
+    if (enemy.mode !== 'gone') stir.push({ p: [enemy.p[0], enemy.p[1] + 1, enemy.p[2]], v: enemy.v, r: .9, drag: 9 });
+    if (eb) for (const k of [.2, .8]) stir.push({ p: [0, 1, 2].map(a => eb.a[a] + (eb.b[a] - eb.a[a]) * k), v: eb.vel, r: 1.1, drag: 40 });
+    const e = camera.matrixWorld.elements, tanY = Math.tan(camera.fov * Math.PI / 360), focal = VH / (2 * tanY);
+    camera.getWorldDirection(fwd);
+    const camInfo = { y: camera.position.y, tanY, aspect: camera.aspect, fy: fwd.y, uy: e[5], ry: e[1] };
+    if (frame === 0) { prevPos.copy(camera.position); prevFwd.copy(fwd); }
+    const vf = gpu.begin(); vf.stage('veils');
+    for (const v of veils) {
+      const c = toLayer(prevPos.x + prevFwd.x * v.d, prevPos.y + prevFwd.y * v.d, prevPos.z + prevFwd.z * v.d); // where last frame's centre is now
+      const splats = [];
+      for (const s of stir) {
+        const a = toLayer(s.p[0], s.p[1], s.p[2]), w = Math.exp(-(((a[2] - v.d) / 2.6) ** 2));
+        if (a[2] < .4 || w < .03) continue;
+        const b = toLayer(s.p[0] + s.v[0] * .05, s.p[1] + s.v[1] * .05, s.p[2] + s.v[2] * .05);
+        splats.push({ x: a[0], y: a[1], r: s.r / a[2] * focal, w, vx: (b[0] - a[0]) / .05, vy: (b[1] - a[1]) / .05, den: 0, drag: s.drag });
+      }
+      v.step(vf, dt, t, [c[0] - VW / 2, c[1] - VH / 2], camInfo, splats);
+    }
+    vf.end(); prevPos.copy(camera.position); prevFwd.copy(fwd);
     fog.u.time.value = t;
     fog.u.hero.value.set(player.p[0], player.p[1] + (f < 2 ? .95 : 0), player.p[2]); fog.u.heroR.value = [1.4, 1.6, 2.4, 1.6][f];
     fog.u.hero2.value.set(enemy.p[0], enemy.mode === 'gone' ? -99 : enemy.p[1] + .95, enemy.p[2]);
