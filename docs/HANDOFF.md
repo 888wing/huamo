@@ -561,6 +561,55 @@ Bugs found on the way:
 Not done from the plan: the giant's free hand does not swat at the crane; trees do not shake at a stamp; the charge
 was looked at only from far off through trees; nothing has been played by hand.
 
+## Round 27 (2026-11-15): the way onto the head, put in order
+
+The owner's verdict on round 25's kill: the process was confusing and the motion looked a mess; any one beast should
+be enough. The old main route took four changes of form in four seconds (roll, tiger, shoulder, leap, crane, attack)
+under a free camera. What changed:
+
+- **The tiger alone** (`?boss&demo=climb`). At the lying hand it gathers itself (0.3 s), runs the arm at 4.3 m/s, makes
+  one bound from the shoulder onto the crown (`ride.kind` `arm` → `leap` → `head`) and stands there. On the head the
+  blow is the player's: attack, and the swordsman rises out of the tiger, lifts the sword in both hands (`raise`, 0.62 s)
+  and drives it in. Four seconds without a press and the giant tosses its head. With a tiger on it the arm does not get
+  up (`Giant.hold`), and no ink is spent while carried, so the cut on the hand is no longer needed first (it still holds
+  the arm down, 4 s now). The hand lies 2.2 s on its own (was 1.7).
+- **The crane alone** (`?demo=wing`) and **the carp alone** (`?demo=gate`). Out of any beast, attack high in the air is
+  the stab downwards, and a stab begun above the head and within 9 m horizontally goes straight to the crown
+  (`homing`). It hangs over the head for the 0.22 s the body takes to change back, then goes; before that fix the carp
+  arrived still a carp and lay on the head through the slow motion. The stamp throws the carp at 22.5 m/s (was 17),
+  about 3 m above the head.
+- **A camera for the ride.** While carried, the view is taken from the player: it stands 10.5 m off to the arm's open
+  side (never swung more than 1.1 rad from where it was), tilts up with the climb, comes in to 6.8 m level with the
+  crown, and to 5 m as the sword goes up. It is handed back looking the way it was left, also after the kill.
+- **High in the air the camera stays close.** The drop back and the look upwards that face the giant are for someone
+  at its feet; they fade out between 2.5 and 7 m off the ground. Before, the crane was a speck 16 m from a camera
+  lying in the reeds.
+- **The giant stays legible to someone above it.** Its reveal through the smoke was measured from the hero's height,
+  so it washed out as soon as the hero climbed or flew. It is measured from the giant's own ground (`giantY`).
+- **Three lines at the foot of the left edge** name the three ways (key, then what to do). The line of the beast in
+  use grows and says what comes next ("衝向地上的手掌", "沿手臂直上頭頂", "按出招　刺下！"); with the hand down and no
+  beast taken, the tiger's line speaks up.
+- The brush character 斬 is stamped beside the head, not over the blow.
+
+`tools/check-climb.mjs` reports which beasts were used up to the stab; `tools/trace.mjs` prints a demo line by line.
+
+Measured, scripted, both builds (`tools/check-climb.mjs`), from the change of form to the sword in its head:
+
+| way | beasts used | time | stages |
+|---|---|---|---|
+| `climb` | tiger | 3.2 s | on the arm 12.8 s, the bound 14.0 s, on the head 14.6 s, sword up 15.4 s, in 16.0 s |
+| `wing` | crane | 2.4 s | crane 7.1 s, in 9.5 s |
+| `gate` | carp | 1.5 s | carp 8.0 s, thrown 8.9 s, in 9.5 s |
+| `pillar` | tiger, crane | 2.7 s | unchanged route, still works |
+
+All four end with full health and no errors. With the blow withheld (`?boss&demo=climb&nostab`, read with
+`tools/trace.mjs`) the tiger is tossed off after 4.1 s and lands unhurt. The other checks (moves, shift, boss, the
+journey, sound) pass as before. Whole frame 8.3 / 11.1 ms at 720p / 1080p, unchanged. Sizes:
+`dist/smoke-procedural.html` **302.3 KB gzip**, `dist/index.html` 397.2 KB gzip.
+
+Not verified: none of it was played by hand; the hint lines were read only at 1280 px wide (at 640 px they run under
+the ink gauge); how the timing of the tiger's window (2.2 s to reach the hand) feels with real hands.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).
@@ -670,8 +719,8 @@ Phenomena, checked in slice views (`out/validate.png`, `out/v_carp2.png`):
   suspect.
 - Solver A: no vortex street behind the carp at 0.25 m cells.
 - The simulation takes one fixed 1/60 s step per rendered frame, so it slows down if the frame rate drops.
-- The giant cannot be defeated yet (step 5: climbing it and the final stab). Its feet slide a little when the pose
-  changes; skirt strips pass through a raised leg; nothing collides with bushes.
+- The giant's feet slide a little when the pose changes; skirt strips pass through a raised leg; nothing collides
+  with bushes. Standing on its head, the swordsman's feet are set on the crown's point, not on the skull's surface.
 - Not tested: Safari, Firefox, Windows, any phone, a real interactive play session (all checks were scripted runs in
   headless Chrome).
 

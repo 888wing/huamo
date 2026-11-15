@@ -262,9 +262,10 @@ export class Figure {
   plant(h, st, sp, gk) {
     const { p, yaw } = st, v = st.v ?? ZERO, sy = Math.sin(yaw), cy = Math.cos(yaw);
     if (this.ikW < .05 || this.fresh) { // legs posed directly (a stroke, a roll, the air): the feet's memory just follows them
-      for (const f of this.feet) { this.B['foot' + f.k].getWorldPosition(f.pos); f.pos.y = height(f.pos.x, f.pos.z); f.t = 1; f.err = 0; }
+      for (const f of this.feet) { this.B['foot' + f.k].getWorldPosition(f.pos); f.pos.y = st.floor ?? height(f.pos.x, f.pos.z); f.t = 1; f.err = 0; }
       this.fresh = false; return;
     }
+    if (st.floor !== undefined) { for (const f of this.feet) { f.pos.set(p[0] + cy * f.s * .15, st.floor, p[2] - sy * f.s * .15); f.t = 1; f.err = 0; } return; }   // carried: the feet go with what carries them
     const stride = .5 + .17 * sp, T = Math.max(.13, Math.min(.3, stride / Math.max(sp, 1) * .55)), dx = sp > .05 ? v[0] / sp : 0, dz = sp > .05 ? v[2] / sp : 0;
     const ahead = Math.min(stride * .45, .42), due = sp > .3 ? Math.min(stride * .5, .45) : .13;
     for (let i = 0; i < 2; i++) {
@@ -280,7 +281,7 @@ export class Figure {
         f.t = Math.min(1, f.t + h / f.T);
         const rem = (1 - f.t) * f.T, tx = hx + v[0] * rem + dx * ahead, tz = hz + v[2] * rem + dz * ahead, e = f.t * f.t * (3 - 2 * f.t);
         f.pos.set(f.from.x + (tx - f.from.x) * e, 0, f.from.z + (tz - f.from.z) * e);
-        f.pos.y = height(f.pos.x, f.pos.z) + (.05 + .17 * Math.min(1, sp / 5.5)) * Math.sin(Math.PI * f.t);
+        f.pos.y = (st.floor ?? height(f.pos.x, f.pos.z)) + (.05 + .17 * Math.min(1, sp / 5.5)) * Math.sin(Math.PI * f.t);
         if (f.t >= 1) f.landed = true; // for whoever wants to hear it
       }
     }
@@ -345,7 +346,7 @@ export class Figure {
     if (st.land > 0 && !st.landHard) { const e = Math.sin(Math.PI * cl(1 - st.land / .14)); hipY -= .27 * e; lean += .22 * e; mixTo(B.armL, -.2, 0, .7, e * .6); mixTo(B.armR, -.2, 0, -.7, e * .6); }
 
     // ---- actions
-    const drawn = t >= 0 || st.windup > 0 || gk > .3 || !!st.guard || st.plunge > 0 || (st.death > 0 && st.death < .6) || st.parryT > 0;
+    const drawn = t >= 0 || st.windup > 0 || gk > .3 || !!st.guard || st.plunge > 0 || st.raise > 0 || (st.death > 0 && st.death < .6) || st.parryT > 0;
     if (gk > .01) { // on guard: sword raised across the body, the body turned side-on behind it
       mixTo(B.armR, -1.25, 0, .45, gk); mixTo(B.foreR, -1.25, 0, 0, gk); mixTo(B.armL, -1.0, 0, -.35, gk); mixTo(B.foreL, -1.2, 0, 0, gk);
       hipY -= .08 * gk; twist += .3 * gk; lean += (.1 - lean) * gk * .6;
@@ -395,6 +396,10 @@ export class Figure {
       pitch = 6.2832 * sm(u, .04, .9); pivot = .5; ik = 0; stiff = 900; twist = 0; roll = 0; hipY -= .32 * tk; lean = .1 + .75 * tk; curl = .45 * tk; headX = .55 * tk;
       set(B.thighL, -1.95 * tk - .1, 0, .1); set(B.shinL, 2.3 * tk + .1); set(B.thighR, -1.85 * tk - .1, 0, -.1); set(B.shinR, 2.25 * tk + .1);
       mixTo(B.armL, -1.35, 0, -.25, tk); mixTo(B.foreL, -1.7, 0, 0, tk); mixTo(B.armR, -1.35, 0, .25, tk); mixTo(B.foreR, -1.7, 0, 0, tk);
+    }
+    if (st.raise > 0) { // standing over it for the last blow: the sword goes up in both hands, point down, the back arched
+      const e = st.raise; grip = e; stiff = 700; twist = 0; hipY -= .05 * e; lean = -.14 * e; headX = .3 * e;
+      mixTo(B.armR, -2.7, 0, .34, e); mixTo(B.foreR, -.6, 0, 0, e); mixTo(B.armL, -2.7, 0, -.34, e); mixTo(B.foreL, -.6, 0, 0, e);
     }
     const pg = st.plunge ?? 0;
     if (pg) { // the stab from the air: both hands on the hilt, the point straight down, the body curled over it; then crouched over the sword in the ground

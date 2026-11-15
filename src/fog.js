@@ -38,7 +38,7 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     projInv: uniform(camera.projectionMatrixInverse), camWorld: uniform(camera.matrixWorld), camPos: uniform(new THREE.Vector3()),
     near: uniform(camera.near), far: uniform(camera.far), dpr: uniform(1),
     boxMin: uniform(new THREE.Vector3()), boxSize: uniform(new THREE.Vector3(1, 1, 1)),
-    flash: uniform(0), mangaC: uniform(new THREE.Vector2(.5, .5)), focus: uniform(0), burst: uniform(0), slash: uniform(0), slashDir: uniform(new THREE.Vector2(1, 0)), invert: uniform(0), smoke: uniform(1), foregroundDensity: uniform(foregroundDensity), heroClear: uniform(0), enemyClear: uniform(0), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
+    flash: uniform(0), mangaC: uniform(new THREE.Vector2(.5, .5)), focus: uniform(0), burst: uniform(0), slash: uniform(0), slashDir: uniform(new THREE.Vector2(1, 0)), invert: uniform(0), smoke: uniform(1), foregroundDensity: uniform(foregroundDensity), heroClear: uniform(0), giantY: uniform(0), enemyClear: uniform(0), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
     slice: uniform(0.3), sliceV: uniform(0), top: uniform(10), reach: uniform(90), fogTop: uniform(FOG_TOP),
     paper: uniform(new THREE.Color(PAPER)), ink: uniform(new THREE.Color(INK)),
     air: uniform(new THREE.Color(PAPER).lerp(new THREE.Color(INK), .26)), // the air is a grey wash, so white fog is the lightest thing in the picture
@@ -215,7 +215,7 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     const reveal = playerMask.mul(u.heroClear).mul(mix(.57, 1, upper));
     // The same matte keeps the stagger, fall and wet ink legible inside the foreground veils.
     // The giant (marked .25) comes through from the chest up; its legs stay sunk in the fog.
-    const giantMask = step(.1, subjectT.r).mul(step(subjectT.r, .4)), rise = mix(.3, 1, smoothstep(1.5, 5.5, wp.y.sub(u.hero.y)));
+    const giantMask = step(.1, subjectT.r).mul(step(subjectT.r, .4)), rise = mix(.3, 1, smoothstep(1.5, 5.5, wp.y.sub(u.giantY)));   // (measured from the ground it stands on: it reads the same to someone on its shoulder or in the air above it)
     const opponent = clamp(subjectT.r.mul(2), 0, 1).mul(playerMask.oneMinus()).mul(mix(1, rise.mul(2), giantMask)).mul(u.enemyClear);
     const keep = max(max(near(u.hero, u.heroR), near(u.hero2, float(1.35))).mul(.8), max(reveal, opponent).mul(.96));
     col.assign(col.mul(mix(fg.z, 1, keep)).add(u.paper.mul(fg.x.mul(keep.oneMinus()))).add(u.ink.mul(fg.y)));

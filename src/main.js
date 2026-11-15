@@ -167,6 +167,10 @@ async function boot() {
     `巨相撲鬼<span style="writing-mode:horizontal-tb;display:inline-block;margin-top:1.4vh;padding:.5vh .9vh;background:#b3301f;color:#f1e9da;font:700 2.6vh/1.1 ui-serif,Georgia,serif;border-radius:.4vh">Boss</span>`);
   const endCard = mk('position:fixed;inset:0;display:grid;place-items:center;background:rgba(236,230,216,0);pointer-events:none;opacity:0',
     `<div style="text-align:center;font:600 3vh/1.9 ${SERIF};color:#121419"><div style="display:inline-block;padding:1.2vh 1.4vh;background:#b3301f;color:#f1e9da;font:700 9vh/1.1 ${SERIF};writing-mode:vertical-rl;border-radius:.6vh">化墨</div><br>巨相撲鬼 伏誅<br><span style="opacity:.6;font-size:2vh">按 R 再來一次</span></div>`);
+  // the ways onto its head: one line for each beast at the foot of the left edge. The line of the beast in use says what comes next
+  const ROUTES = [['虎', 'Shift ×2', '巨掌拍落地面時　衝上手臂'], ['鶴', '空白 ×2', '按住空白飛過頭頂　按出招刺下'], ['鯉', 'Q ×2', '潛到腳邊等它踏地　拋到高處按出招']];
+  const hint = mk(`position:fixed;left:18px;bottom:14px;pointer-events:none;font:600 15px/1.75 ${SERIF};color:#121419;opacity:0;text-shadow:0 0 5px #ece6d8,0 0 2px #ece6d8`, ROUTES.map(() => '<div style="white-space:nowrap"></div>').join(''));
+  let hintK = 0, hintKey = '';
   const stamps = [];
   const stamp = (text, at, size = 1, red = false) => {
     const el = mk(`position:fixed;left:0;top:0;pointer-events:none;white-space:nowrap;font:900 ${Math.round(innerHeight * .17 * size)}px/1 ${SERIF};color:${red ? '#b3301f' : '#121419'};filter:url(#ib);will-change:transform,opacity`);
@@ -185,7 +189,7 @@ async function boot() {
   let hold = 0, clock = 0, flash = 0, kick = 0, gcam = 0, heroClearUntil = 0, slowT = 0, wasFallen = false;
   const tgt = new THREE.Vector3(), eye = new THREE.Vector3(), want = new THREE.Vector3();
   const soles = [new THREE.Vector3(), new THREE.Vector3()];
-  let camReady = false;
+  let camReady = false, rideWas = false, rideSet = false, rideAz = 0, rideTo = 0;
 
   function tick() {
     // a blow that lands stops time for a few frames: that pause is where the weight is felt
@@ -194,7 +198,7 @@ async function boot() {
     if (demo) demo(t, player, cam, override);
     const beforeX = player.p[0], beforeZ = player.p[2];
     // a staged moment (the giant's entrance, the kill) runs on real time; the entrance can be skipped with any key
-    if (cine) { cine.t += DT; if (cine.t >= cine.dur || (anyKey && cine.kind === 'entrance' && cine.t > .5)) { cine = null; show(false); } }
+    if (cine) { cine.t += DT; if (cine.t >= cine.dur || (anyKey && cine.kind === 'entrance' && cine.t > .5)) { if (cine.kind === 'kill') cam.yaw = Math.atan2(tgt.x - eye.x, tgt.z - eye.z); cine = null; show(false); } }
     anyKey = false; player.staged = cine?.kind === 'entrance';
     const held = player.staged ? { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false } : demo ? override : input();
     player.update(dt, held, cam, enemy.alive ? enemy.p : giant.aim(player.p));
@@ -207,7 +211,7 @@ async function boot() {
     // what the body did this step that the air should feel: leaving the ground, coming down, the stab from the air, landing on its back
     for (const ev of player.events.splice(0)) {
       const k = Math.min(1, (ev.v ?? 0) / 14);
-      sound.play({ jump: 'jump', land: 'land', down: 'land', dodge: 'roll', shift: 'shift', breach: 'splash', mount: 'step', plunge: 'land', headstab: 'stab' }[ev.kind], { v: ev.kind === 'land' ? k : 1, back: ev.to === 0 });
+      sound.play({ jump: 'jump', land: 'land', down: 'land', dodge: 'roll', shift: 'shift', breach: 'splash', mount: 'step', onhead: 'land', plunge: 'land', headstab: 'stab' }[ev.kind], { v: ev.kind === 'land' ? k : 1, back: ev.to === 0 });
       if (ev.kind === 'jump') fx.push({ a: ev.at, r: 1.3, ink: 0, div: 9, life: .16, t: 0 });
       else if (ev.kind === 'land') { fx.push({ a: ev.at, r: 1.2 + 1.2 * k, ink: 0, div: 8 + 16 * k, life: .2, t: 0 }); shake = Math.max(shake, .3 * k); }
       else if (ev.kind === 'down') { fx.push({ a: ev.at, r: 1.8, ink: 0, div: 14, life: .2, t: 0 }); shake = Math.max(shake, .5); }
@@ -216,10 +220,11 @@ async function boot() {
         blasts.push({ p: [ev.at[0], ev.at[1] + 1, ev.at[2]], r: 3.2, split: 130, den: -9, life: .35, t: 0 }); flash = Math.max(flash, .08); shake = Math.max(shake, .3);
       }
       else if (ev.kind === 'mount') shake = Math.max(shake, .4);
+      else if (ev.kind === 'onhead') { shake = Math.max(shake, .8); fx.push({ a: ev.at, r: 1.6, ink: .25, div: 12, life: .2, t: 0 }); }
       else if (ev.kind === 'breach') { fx.push({ a: ev.at, r: 1.6, ink: 0, div: 16, life: .2, t: 0 }); blasts.push({ p: ev.at, r: 3, split: 160, den: -8, life: .35, t: 0 }); }
       else if (ev.kind === 'headstab') { // the sword goes into the giant's head: everything stops for it
         cine = { kind: 'kill', t: 0, dur: 3.6, a0: Math.atan2(eye.x - ev.at[0], eye.z - ev.at[2]) }; show(true);
-        slowT = 1.5; hold = 14; flash = 1; kick = 1; shake = 2.4; invertN = 3; burstK = 1; burstAt = ev.at; geyser = 1.1; stamp('斬', ev.at, 1.5, true);
+        slowT = 1.5; hold = 14; flash = 1; kick = 1; shake = 2.4; invertN = 3; burstK = 1; burstAt = ev.at; geyser = 1.1; tv.setFromMatrixColumn(camera.matrixWorld, 0); stamp('斬', [ev.at[0] + tv.x * 3, ev.at[1] + 1.2, ev.at[2] + tv.z * 3], 1.5, true);   // (beside the head, not over the blow itself)
         fx.push({ a: ev.at, r: 3, ink: 2, div: 40, life: .4, t: 0 }); blasts.push({ p: ev.at, r: 9, split: 320, den: -40, life: .8, t: 0 });
       }
       else if (ev.kind === 'plunge') {
@@ -319,13 +324,39 @@ async function boot() {
     // ---- camera: follows with a little lag, and shakes when something big happens
     shake = Math.max(player.shake, shake * Math.exp(-9 * DT)); player.shake = 0;
     gcam += ((giant.awake ? 1 : 0) - gcam) * (1 - Math.exp(-1.4 * dt)); // facing the giant the camera drops back and looks up
-    want.set(player.p[0], player.p[1] + (f < 2 ? 1.5 : .3) + 1.1 * gcam, player.p[2]);
-    if (!camReady) tgt.copy(want); else tgt.lerp(want, 1 - Math.exp(-14 * dt));
+    // Carried up the giant, the view is taken out of the player's hands for those few seconds. It stands well off to the
+    // arm's open side, where the whole arm and the head are in the picture, and only tilts up as the tiger climbs; with
+    // the tiger on the head it comes in level with the crown. It is handed back looking the way it was left.
+    // (the drop back and the look upwards are for someone on the ground at its feet: high in the air beside it the view stays close)
+    const low = 1 - .85 * sm(player.p[1] - height(player.p[0], player.p[2]), 2.5, 7);
+    const rideCam = !!player.ride && player.ride.kind !== 'rock' && !!giant.parts && giant.alive && !cam.fixed;
+    if (rideCam && !rideWas) { rideAz = Math.atan2(eye.x - giant.p[0], eye.z - giant.p[2]); rideTo = rideAz; }
+    if (!rideCam && rideWas && !cine) cam.yaw = Math.atan2(tgt.x - eye.x, tgt.z - eye.z);
+    rideWas = rideCam;
+    if (rideCam) {
+      const P = giant.parts, c = P.crown, G = giant.p, on = player.ride.kind === 'head', ramp = giant.ramp;
+      if (ramp && player.ride.kind === 'arm') { // side-on to the arm, on the side away from the body; never swung more than a third of the way round
+        const ux = ramp[2][0] - ramp[0][0], uz = ramp[2][2] - ramp[0][2], sgn = uz * (ramp[1][0] - G[0]) - ux * (ramp[1][2] - G[2]) > 0 ? 1 : -1;
+        const mx = (ramp[0][0] + ramp[2][0]) / 2 + sgn * uz * 3, mz = (ramp[0][2] + ramp[2][2]) / 2 - sgn * ux * 3, d = Math.atan2(Math.sin(Math.atan2(mx - G[0], mz - G[2]) - rideAz), Math.cos(Math.atan2(mx - G[0], mz - G[2]) - rideAz));
+        if (!rideSet) { rideSet = true; rideTo = rideAz + Math.max(-1.1, Math.min(1.1, d)); }
+      }
+      rideAz += Math.atan2(Math.sin(rideTo - rideAz), Math.cos(rideTo - rideAz)) * (1 - Math.exp(-2.6 * dt));
+      const near = on && player.ride.stab >= 0, R = near ? 5 : on ? 6.8 : 10.5, hx = on ? c[0] : G[0], hz = on ? c[2] : G[2], w = .62;   // (w: how much of the look goes to the tiger, the rest to the head it is making for)
+      want.set(on ? c[0] : player.p[0] * w + P.head[0] * (1 - w), on ? c[1] + .8 : (player.p[1] + .6) * w + P.head[1] * (1 - w), on ? c[2] : player.p[2] * w + P.head[2] * (1 - w));
+      tgt.lerp(want, 1 - Math.exp(-5 * dt));
+      want.set(hx + Math.sin(rideAz) * R, on ? c[1] + (near ? 1.1 : 1.5) : G[1] + 2.2 + .4 * (player.p[1] - G[1]), hz + Math.cos(rideAz) * R);
+      want.y = Math.max(want.y, height(want.x, want.z) + .6);
+      eye.lerp(want, 1 - Math.exp(-(near ? 6 : 3.4) * dt));
+    } else {
+      rideSet = false;
+      want.set(player.p[0], player.p[1] + (f < 2 ? 1.5 : .3) + 1.1 * gcam * low, player.p[2]);
+      if (!camReady) tgt.copy(want); else tgt.lerp(want, 1 - Math.exp(-14 * dt));
+    }
     if (cam.fixed) { eye.set(...cam.fixed.pos); tgt.set(...cam.fixed.look); }
-    else {
+    else if (!rideCam) {
       // while the giant raises a leg or an arm the camera sinks and looks up a little more; riding it, it closes in
       tcam += ((giant.alive && giant.awake ? Math.max(giant.lift, giant.wind) : 0) - tcam) * (1 - Math.exp(-5 * dt));
-      const pitch = Math.min(.9, cam.pitch + .36 * gcam + .1 * tcam), cp = Math.cos(pitch), dist = cam.dist * [1, 1.2, 1.5, 1.15][f] * (1 + .7 * gcam + .1 * tcam) * (player.ride ? .75 : 1);
+      const pitch = Math.min(.9, cam.pitch + (.36 * gcam + .1 * tcam) * low), cp = Math.cos(pitch), dist = cam.dist * [1, 1.2, 1.5 - .3 * gcam, 1.15][f] * (1 + (.7 * gcam + .1 * tcam) * low) * (player.ride ? .75 : 1);
       want.set(tgt.x - Math.sin(cam.yaw) * cp * dist, tgt.y - Math.sin(pitch) * dist, tgt.z - Math.cos(cam.yaw) * cp * dist);
       const cq = [want.x, 0, want.z]; pushOut(cq, .45); want.x = cq[0]; want.z = cq[2]; // the camera does not sit inside a trunk
       want.y = Math.max(want.y, height(want.x, want.z) + .6);
@@ -473,7 +504,8 @@ async function boot() {
     const nearOpponent = Math.hypot(enemy.p[0] - player.p[0], enemy.p[2] - player.p[2]) < 5.8;
     // The giant is always partly legible once it is awake, and fully while it raises a leg or an arm or lies on its hand:
     // the foreground veils are heavy, and its tells are what the player has to read.
-    const giantShown = giant.awake ? .5 + .5 * Math.max(giant.lift, giant.wind, giant.roar, giant.planted ? 1 : 0) : .22;
+    fog.u.giantY.value = giant.p[1];
+    const giantShown = giant.awake ? .5 + .5 * Math.max(giant.lift, giant.wind, giant.roar, giant.planted || rideCam ? 1 : 0) : .22;
     const showOpponent = enemy.mode === 'done' ? giantShown : enemy.mode === 'fall' || enemy.mode === 'gone' || enemy.mode === 'reel'
       ? 1 : enemy.alive && nearOpponent ? .35 : 0;
     enemyClear.value += (showOpponent - enemyClear.value) * (1 - Math.exp(-(showOpponent > enemyClear.value ? 18 : 4) * dt));
@@ -493,6 +525,23 @@ async function boot() {
       }
       hud.textContent = s;
     }
+    { // the ways up show while the giant is there to be climbed
+      const on = giant.awake && giant.alive && giant.mode !== 'rise' && !cine && !ended;
+      hintK += ((on ? 1 : 0) - hintK) * Math.min(1, 4 * DT); hint.style.opacity = hintK.toFixed(3);
+      if (on) {
+        const c = giant.parts?.crown, above = !!c && player.p[1] > c[1] - .5, R = player.ride?.kind, stab = '按出招　刺向頭頂！';
+        const now = f === 1 ? (R === 'head' ? '按出招　刺下！' : R === 'arm' || R === 'leap' ? '沿手臂直上頭頂' : giant.ramp ? '衝向地上的手掌' : '等巨掌拍落地面')
+          : f === 2 ? (above ? stab : '按住空白升高　飛到頭頂上方') : f === 3 ? (player.p[1] > FOG_TOP + 1 ? (above ? stab : '還不夠高') : '游到腳邊　等它踏地') : '';
+        const down = !!giant.ramp;
+        if (f + now + down !== hintKey) {
+          hintKey = f + now + down;
+          ROUTES.forEach(([g, k, how], i) => { // (with the hand lying there and no beast taken yet, the tiger's line speaks up)
+            const el = hint.children[i], act = f === i + 1, call = f === 0 && i === 0 && down;
+            el.textContent = act ? `${g}　${now}` : call ? `${g}　${k}　巨掌已落地　衝上手臂！` : `${g}　${k}　${how}`; el.style.opacity = act || call ? 1 : f === 0 ? (down ? .3 : .66) : .2; el.style.fontSize = act ? '19px' : '';
+          });
+        }
+      }
+    }
     { // the gauge shows whenever it is not simply full
       const ink = player.ink, beast = f !== 0 && !player.free, low = !beast && ink < SHIFT_MIN, dry = 1 - ink;
       gauge.style.opacity = beast || ink < .995 ? (beast && ink < .2 ? .55 + .45 * Math.sin(frame * .9) : 1) : 0;
@@ -509,11 +558,11 @@ async function boot() {
   window.__bench = async k => { const t0 = performance.now(); for (let i = 0; i < k; i++) { tick(); await device.queue.onSubmittedWorkDone(); } return (performance.now() - t0) / k; };
   window.__state = () => ({ frame, ms, clock, hold, p: player.p, form: player.form, hp: player.hp, combo: player.combo,
     attack: player.actT, dealt, taken, warded, foe: enemy.mode, enemyHp: enemy.hp, enemyIndex: enemy.n, fall: enemy.fallT, melt: enemy.meltT,
-    sound: sound.on, step: player.demoStep, pinned: !!giant.pinned, ride: player.ride?.kind ?? null, bossDeath: giant.death, cine: cine?.kind ?? null, ended, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
+    sound: sound.on, step: player.demoStep, pinned: !!giant.pinned, ride: player.ride?.kind ?? null, stab: player.ride?.stab ?? null, raise: player.raise, hint: hintKey, bossDeath: giant.death, cine: cine?.kind ?? null, ended, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
     hero: { ik: hero.ikW, feet: hero.feet.map(f => { const b = hero.B['foot' + f.k].getWorldPosition(tv); return { planted: f.t >= 1, x: b.x, y: b.y, z: b.z }; }) },
     boss: giant.mode, parts: giant.parts, target: giant.target, planted: giant.planted && giant.fall >= 1 && giant.ik >= 1, side: giant.side,
     foot: giant.parts ? ['footL', 'footR'].map(k => giant.parts[k][1] - height(giant.parts[k][0], giant.parts[k][2])) : null });
-  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
+  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; hint.style.display = 'none'; } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
   if (q.has('manual')) { tick(); window.__done = true; return; }
   renderer.setAnimationLoop(tick);
   window.__done = true;

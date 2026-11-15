@@ -7,10 +7,10 @@ import { height, ARENA, FOG_TOP } from './world.js';
 export const GH = 10.5; // metres tall
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a)), cl = x => Math.min(1, Math.max(0, x)), ease = x => { x = cl(x); return x * x * (3 - 2 * x); };
 // stamp: raise the leg, hold it, bring it down, settle. slam: raise the arm, strike, lie on the hand, get up
-const S_UP = .85, S_HOLD = .32, S_DROP = .13, S_SET = 1.0, M_UP = 1.05, M_HIT = .2, M_LIE = 1.7, M_BACK = 1.1;
+const S_UP = .85, S_HOLD = .32, S_DROP = .13, S_SET = 1.0, M_UP = 1.05, M_HIT = .2, M_LIE = 2.2, M_BACK = 1.1;
 const REACH = [4.0, 5.6];
 // sweep: the hand goes down at its own side, then scythes across the front. charge: down into the start, a drive forward, a skid
-const W_UP = .9, W_GO = .42, W_BACK = .9, C_UP = 1.0, C_GO = .55, C_END = .6, C_DIST = 6.5, STUN = 3;
+const W_UP = .9, W_GO = .42, W_BACK = .9, C_UP = 1.0, C_GO = .55, C_END = .6, C_DIST = 6.5, STUN = 4;
 export const DYING = 6.5; // from the sword going in to the last of the ink: reel, sway, fall, run out
 
 export class Giant {
@@ -18,7 +18,7 @@ export class Giant {
     const [x, z] = ARENA.home;
     this.p = [x, height(x, z), z]; this.yaw = 0; this.mode = 'sleep'; this.clock = 0; this.time = 0; this.side = 1; this.walk = 0; this.walkAmt = 0;
     this.crouch = 1; this.lift = 0; this.squat = 0; this.wind = 0; this.down = 0; this.fall = 0; this.ik = 0; this.flinch = 0; this.roar = 0; this.glow = 0; this.fast = false;
-    this.lie = M_LIE; this.twist = 0; this.death = 0; this.dir = [0, 1]; this.sweepA = 0; this.gone = 0;
+    this.lie = M_LIE; this.hold = 0; this.twist = 0; this.death = 0; this.dir = [0, 1]; this.sweepA = 0; this.gone = 0;
     this.target = [x, this.p[1], z + 5]; this.ring = null; this.parts = null; this.prev = null; this.vel = {}; this.seed = 7; this.think = 1; this.count = 0; this.done = false;
   }
   rnd() { this.seed = (this.seed * 16807) % 2147483647; return this.seed / 2147483647; }
@@ -30,7 +30,7 @@ export class Giant {
   // the sword has gone into its head
   die() { if (!this.alive) return; this.go('dying'); this.ring = null; this.lift = this.wind = this.ik = this.roar = 0; this.fast = false; }
   go(mode) { this.mode = mode; this.clock = 0; this.done = false; }
-  rest(t) { this.go('idle'); this.think = t; this.lift = this.squat = this.wind = this.down = this.fall = this.ik = this.twist = 0; this.fast = false; this.lie = M_LIE; this.pinned = false; if (this.crouch < 1) this.crouch = 0; }
+  rest(t) { this.go('idle'); this.think = t; this.lift = this.squat = this.wind = this.down = this.fall = this.ik = this.twist = 0; this.fast = false; this.lie = M_LIE; this.hold = 0; this.pinned = false; if (this.crouch < 1) this.crouch = 0; }
 
   // pl: the player. ready: the four shadows are down. Returns what happened: [{ kind, at }]
   update(dt, pl, ready) {
@@ -46,7 +46,7 @@ export class Giant {
       if (c > 1.9 && !this.done) { this.done = true; ev.push({ kind: 'roar', at: P?.head ?? [...p] }); }
       if (c > 3.2) { this.roar = 0; this.go('stomp'); this.side = 1; }
     } else if (this.mode === 'idle') {
-      turn(1.1); this.think -= dt;
+      if (!pl.ride) turn(1.1); this.think -= dt;
       if (this.think <= 0 && pl.fallen <= 0) {
         const r = this.rnd(), far = Math.hypot(p[0] - ARENA.home[0], p[2] - ARENA.home[1]), facing = Math.abs(off) < .45;
         this.side = -this.side;
@@ -73,11 +73,12 @@ export class Giant {
         this.done = true; const at = P ? [...P[this.side > 0 ? 'footL' : 'footR']] : [...p]; at[1] = height(at[0], at[2]);
         this.ring = { at, r: 0, t: 0, hit: false }; ev.push({ kind: 'stomp', at });
         // 鯉躍龍門: the fog thrown up by the stamp carries a carp near it out of the fog and high into the air
-        if (pl.form === 3 && pl.p[1] < FOG_TOP && Math.hypot(pl.p[0] - at[0], pl.p[2] - at[2]) < 6.5) { pl.v[1] = 17; pl.p[1] = FOG_TOP - .29; ev.push({ kind: 'gate', at: [...pl.p] }); }
+        if (pl.form === 3 && pl.p[1] < FOG_TOP && Math.hypot(pl.p[0] - at[0], pl.p[2] - at[2]) < 6.5) { pl.v[1] = 22.5; pl.p[1] = FOG_TOP - .29; ev.push({ kind: 'gate', at: [...pl.p] }); }
       }
       this.squat = c >= land ? 1 - ease((c - land) / S_SET) : 0;
       if (c > land + S_SET) this.rest(.7 + this.rnd() * .7);
     } else if (this.mode === 'slam') {
+      if (this.hold > 0) { this.hold -= dt; this.lie = Math.max(this.lie, c - M_UP - M_HIT + .3); }   // something is on the arm: it stays where it is
       const k1 = c / M_UP, k2 = (c - M_UP) / M_HIT, k3 = (c - M_UP - M_HIT - this.lie) / M_BACK;
       this.fast = k2 > 0 && k2 < 3.5; // the body follows the hand down at once
       if (k1 < .72) { // until late in the wind-up the hand is still being aimed
