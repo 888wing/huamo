@@ -202,6 +202,11 @@ Owner approved both follow-ups.
 Stills of a stroke show the smoke swept into curved bands along the blade's arc and curled puffs afterwards.
 Not judged in motion.
 
+Round 14 follow-up: the carried pictures stretched into long smears with a hard arc after a strong stroke, and the
+whole frame reached 16.9 ms at 1080p. Fixed by (1) letting the pull saturate smoothly (about 40 texels at most) and
+(2) compositing the smoke layers in their own half-resolution pass (`smoke` / `smokeRT` in `fog.js`), returning
+weighted colour and transmittance. Now 8.6 ms at 720p and 11.6 ms at 1080p on the M4.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).
