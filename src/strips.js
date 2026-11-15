@@ -10,7 +10,7 @@ export class Strips {
   // defs: [bone, anchor x y z, rest direction x y z (body space), length, width at root, width at tip, tone (2 = vermilion)]
   // opt: gravity and pull towards the rest direction; body radius and height the strips are kept out of
   constructor(scene, noise, defs, opt = {}) {
-    this.o = { grav: 16, pull: 5, rad: 0, top: 0, ...opt };
+    this.o = { grav: 16, pull: 5, rad: 0, top: 0, stiff: 0, ...opt };
     this.S = defs.map(s => ({ bone: s[0], at: new THREE.Vector3(s[1], s[2], s[3]), dir: [s[4], s[5], s[6]], len: s[7], w0: s[8], w1: s[9] }));
     const n = defs.length, pos = new Float32Array(n * P * 6), uvs = new Float32Array(n * P * 4), tone = new Float32Array(n * P * 2), sid = new Float32Array(n * P * 2), idx = [];
     defs.forEach((s, i) => {
@@ -40,7 +40,7 @@ export class Strips {
       pts[b0] = tmp.x; pts[b0 + 1] = tmp.y; pts[b0 + 2] = tmp.z;
       for (let j = 1; j < P; j++) {
         const q = b0 + j * 3;
-        if (this.fresh) { for (let a = 0; a < 3; a++) pts[q + a] = prev[q + a] = pts[b0 + a] + d[a] * seg * j; continue; }
+        if (this.fresh || j <= o.stiff) { for (let a = 0; a < 3; a++) pts[q + a] = prev[q + a] = pts[b0 + a] + d[a] * seg * j; continue; }
         for (let a = 0; a < 3; a++) { const v = (pts[q + a] - prev[q + a]) * .9; prev[q + a] = pts[q + a]; pts[q + a] += v + acc[a] * dt * dt; }
         const ex = pts[q] - pts[q - 3], ey = pts[q + 1] - pts[q - 2], ez = pts[q + 2] - pts[q - 1], l = Math.hypot(ex, ey, ez) || 1;
         pts[q] = pts[q - 3] + ex / l * seg; pts[q + 1] = pts[q - 2] + ey / l * seg; pts[q + 2] = pts[q - 1] + ez / l * seg;

@@ -1,7 +1,7 @@
 // The three.js side of the world, all drawn as ink on paper: terrain, far mountains, pines, the four bodies and the sword stroke.
 import * as THREE from 'three/webgpu';
-import { Fn, vec3, float, mix, smoothstep, normalWorld, positionWorld, positionLocal, texture3D, dot, uniform, attribute, clamp } from 'three/tsl';
-import { SIZE, height, PILLARS } from './world.js';
+import { Fn, vec2, vec3, float, mix, min, length, smoothstep, normalWorld, positionWorld, positionLocal, texture3D, dot, uniform, attribute, clamp } from 'three/tsl';
+import { SIZE, height, PILLARS, PATH, pathDist } from './world.js';
 import noiseSrc from './noise.wgsl';
 
 export const INK = new THREE.Color(0x121419), PAPER = new THREE.Color(0xece6d8), SEAL = new THREE.Color(0xb3301f);
@@ -40,7 +40,15 @@ function terrainMaterial(noise) {
     const lit = dot(n, sun).mul(.5).add(.5);
     const ground = float(.46).add(blotch.sub(.5).mul(.26)).sub(smoothstep(.66, .8, fine).mul(.16)); // grey ground with crisp dabs: what the white fog is seen against // a few darker dabs
     const face = float(.05).add(streak.mul(.36)).add(lit.mul(.24)).add(blotch.sub(.5).mul(.12));
-    return wash(mix(ground, face, rock));
+    // the path: worn earth, paler than the ground, with a broken ink line along each edge
+    let d = float(1e3);
+    for (let i = 0; i < PATH.length - 1; i++) {
+      const a = vec2(...PATH[i]), ba = vec2(PATH[i + 1][0] - PATH[i][0], PATH[i + 1][1] - PATH[i][1]), pa = p.xz.sub(a);
+      d = min(d, length(pa.sub(ba.mul(clamp(dot(pa, ba).div(dot(ba, ba)), 0, 1)))));
+    }
+    const dw = d.add(streak.sub(.5).mul(.9)), onPath = smoothstep(1.9, 1.3, dw);
+    const edge = smoothstep(.35, 0, dw.sub(1.75).abs()).mul(smoothstep(.35, .6, fine)).mul(.3);
+    return wash(mix(mix(ground, float(.8).add(blotch.sub(.5).mul(.12)), onPath).sub(edge), face, rock));
   })());
 }
 // a far mountain: ink at the ridge, dissolving into nothing at its foot
@@ -101,8 +109,9 @@ export function buildStage(scene, noise) {
   // needle pads are lumpy, not round: ink dabs, each a little different
   const trunkG = new THREE.CylinderGeometry(.45, 1, 1, 6);
   const pads = [0, 1, 2, 3].map(() => {
-    const c = new THREE.SphereGeometry(1, 8, 5), p = c.attributes.position;
-    for (let i = 0; i < p.count; i++) { const k = .62 + rnd() * .7; p.setXYZ(i, p.getX(i) * k, p.getY(i) * (.6 + rnd() * .9), p.getZ(i) * k); }
+    // lumpy but smooth: the bumps follow position, not each vertex, so no facets show up close
+    const c = new THREE.SphereGeometry(1, 16, 10), p = c.attributes.position, s1 = rnd() * 6, s2 = rnd() * 6, s3 = rnd() * 6;
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), k = 1 + .24 * Math.sin(x * 3.1 + s1) * Math.cos(z * 2.7 + s2) + .14 * Math.sin(y * 4 + s3 + x * 2); p.setXYZ(i, x * k, y * (.85 + .2 * Math.sin(x * 2.3 + s3)), z * k); }
     c.computeVertexNormals(); return c;
   });
   const trunkM = foliageMaterial(noise, .0), padM = foliageMaterial(noise, .02);
@@ -120,6 +129,28 @@ export function buildStage(scene, noise) {
   for (let i = 0; i < 9; i++) pine(-20 - rnd() * 8, -13 + rnd() * 26, 1 + rnd() * .5);
   for (let i = 0; i < 16; i++) { const a = rnd() * 6.283, r = 25 + rnd() * 5; pine(Math.cos(a) * r, Math.sin(a) * r, .9 + rnd() * .7); }
   for (const i of [0, 2, 5]) { const [px, pz, , ph] = PILLARS[i]; pine(px + .3, pz - .2, .55, ph - .1); }
+  // the forest: pines all through the basin, standing back from the path and the pillars
+  const clear = (x, z, gap) => pathDist(x, z) > gap && PILLARS.every(([px, pz, pr]) => Math.hypot(x - px, z - pz) > pr + 1.2) && Math.hypot(x, z) < 21;
+  for (let i = 0, n = 0; i < 400 && n < 46; i++) { const x = (rnd() - .5) * 42, z = (rnd() - .5) * 46; if (clear(x, z, 3.4)) { pine(x, z, .7 + rnd() * .55); n++; } }
+  // bushes and grass, thicker along the path's edges. Instanced: one draw each
+  const scatter = (geo, mat, count, gap, sx, sy) => {
+    const mesh = new THREE.InstancedMesh(geo, mat, count), M = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+    for (let i = 0, n = 0; i < count * 40 && n < count; i++) {
+      const x = (rnd() - .5) * 44, z = (rnd() - .5) * 50, d = pathDist(x, z);
+      if (!clear(x, z, gap) || rnd() > 1.2 / (1 + d * .28)) continue;
+      const k = .6 + rnd() * .9; e.set((rnd() - .5) * .3, rnd() * 6.283, (rnd() - .5) * .3); q.setFromEuler(e);
+      M.compose(new THREE.Vector3(x, height(x, z) - .05, z), q, new THREE.Vector3(sx * k, sy * k * (.7 + rnd() * .6), sx * k)); mesh.setMatrixAt(n++, M);
+    }
+    mesh.frustumCulled = false; scene.add(mesh);
+  };
+  scatter(pads[0], padM, 150, 2.1, .55, .38); scatter(pads[2], padM, 90, 2.4, .85, .5);
+  // a tuft of grass: seven thin leaning blades
+  const tp = [], ti = [];
+  for (let b = 0; b < 7; b++) { const a = b * .9, r = .12 + .1 * (b % 3), lx = Math.cos(a) * r, lz = Math.sin(a) * r, o = tp.length / 3;
+    tp.push(lx - .025, 0, lz, lx + .025, 0, lz, lx * 2.2 + (b % 2 ? .05 : -.05), .26 + .08 * (b % 4), lz * 2.2); ti.push(o, o + 1, o + 2); }
+  const tuft = new THREE.BufferGeometry(); tuft.setAttribute('position', new THREE.Float32BufferAttribute(tp, 3)); tuft.setIndex(ti); tuft.computeVertexNormals();
+  const grassM = basic(wash(float(.08))); grassM.side = THREE.DoubleSide;
+  scatter(tuft, grassM, 1300, 1.5, .95, 1.0);
 }
 
 // The four bodies. Flat ink silhouettes with one vermilion accent each.

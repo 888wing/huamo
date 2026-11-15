@@ -21,8 +21,8 @@ const hatMat = (noise, tone) => basic(Fn(() => {
   return wash(float(tone).add(ribs.mul(.22)).add(texture3D(noise, positionWorld.mul(3)).b.sub(.5).mul(.3)).sub(rim.mul(.5)));
 })());
 const geos = new Map();
-export const taper = (r0, r1, len) => { const k = `${r0},${r1},${len}`; if (!geos.has(k)) geos.set(k, new THREE.CylinderGeometry(r0, r1, len, 10).translate(0, -len / 2, 0)); return geos.get(k); };
-export const ball = new THREE.SphereGeometry(1, 14, 10), cone = new THREE.ConeGeometry(1, 1, 22), box = new THREE.BoxGeometry(1, 1, 1);
+export const taper = (r0, r1, len) => { const k = `${r0},${r1},${len}`; if (!geos.has(k)) geos.set(k, new THREE.CylinderGeometry(r0, r1, len, 16, 3).translate(0, -len / 2, 0)); return geos.get(k); };
+export const ball = new THREE.SphereGeometry(1, 20, 14), cone = new THREE.ConeGeometry(1, 1, 28), box = new THREE.BoxGeometry(1, 1, 1);
 
 export class Figure {
   // pal: tones (0 ink .. 1 paper) for robe, cloak, legs, hat, skin, wraps
@@ -39,6 +39,10 @@ export class Figure {
     B.hips = bone(g, 0, .92, 0); B.spine = bone(B.hips, 0, .08, 0); B.chest = bone(B.spine, 0, .24, 0); B.head = bone(B.chest, 0, .3, 0);
     add(B.hips, ball, M.legs, 0, -.02, 0, .19, .13, .15);
     add(B.spine, taper(.2, .17, .3), M.robe, 0, .28, 0);
+    add(B.hips, taper(.18, .27, .5), M.robe, 0, .06, 0);                              // the robe's skirt, solid to mid-thigh: the torn hem hangs from its rim
+    add(B.chest, ball, M.cloak, 0, .17, -.06, .3, .1, .2);                            // a mantle over the shoulders: the cloak's strips come out from under it
+    add(B.chest, taper(.06, .07, .12), M.skin, 0, .32, 0);                            // neck
+    add(B.chest, box, M.cloak, .07, .2, .15, .025, .24, .02); add(B.chest, box, M.cloak, -.07, .2, .15, .025, .24, .02); // the robe's crossed collar
     add(B.spine, taper(.19, .19, .09), M.cloak, 0, .05, 0);                           // sash
     add(B.spine, ball, red, .13, .0, .15, .035, .05, .03);                            // its knot: the one vermilion mark
     add(B.chest, ball, M.robe, 0, .13, 0, .27, .13, .16);
@@ -66,13 +70,13 @@ export class Figure {
 
     // cloth strips: [bone, anchor x y z, rest direction x y z (figure space), length, width at top, width at hem, tone]
     const S = [];
-    for (let i = 0; i < 7; i++) { const a = (i - 3) / 3; S.push([B.chest, a * .22, .12, -.2 - .05 * (1 - a * a), a * .35, -1, -.55, 1.0 + .25 * Math.cos(i * 2.1), .24, .07, pal.cloak + .03 * (i % 3)]); }
-    for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283; S.push([B.hips, Math.sin(a) * .17, .02, Math.cos(a) * .13, Math.sin(a) * .22, -1, Math.cos(a) * .22, .6 + .14 * Math.sin(i * 1.7), .2, .12, pal.robe - .06 * (i % 2)]); }
+    for (let i = 0; i < 7; i++) { const a = (i - 3) / 3; S.push([B.chest, a * .24, .1, -.17 - .05 * (1 - a * a), a * .35, -1, -.55, 1.0 + .25 * Math.cos(i * 2.1), .24, .07, pal.cloak + .03 * (i % 3)]); }
+    for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283; S.push([B.hips, Math.sin(a) * .25, -.4, Math.cos(a) * .22, Math.sin(a) * .2, -1, Math.cos(a) * .2, .42 + .12 * Math.sin(i * 1.7), .24, .13, pal.robe - .06 * (i % 2)]); }
     S.push([B.spine, .15, .0, .14, .3, -1, .3, .5, .05, .02, pal.cloak], [B.spine, .11, .0, .15, .1, -1, .4, .42, .05, .02, pal.cloak]);
     for (let i = 0; i < 3; i++) S.push([B.head, (i - 1) * .06, .08, -.11, (i - 1) * .2, -.8, -.7, .26 + .06 * i, .05, .015, pal.cloak]);
     // the hat's torn brim
     for (let i = 0; i < 16; i++) { const a = i / 16 * 6.283; S.push([B.head, Math.sin(a) * .41, .155, Math.cos(a) * .41, Math.sin(a) * .5, -1, Math.cos(a) * .5, .1 + .07 * ((i * 7) % 3), .13, .03, pal.hat - .1]); }
-    this.cloth = new Strips(scene, noise, S, { rad: .16, top: 1.25 });
+    this.cloth = new Strips(scene, noise, S, { rad: .2, top: 1.3, stiff: 1 });
     this.tip = new THREE.Vector3();
   }
 

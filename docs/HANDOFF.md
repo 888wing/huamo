@@ -237,6 +237,28 @@ shape with variation (it read as a rectangular brush stroke).
 - Steel on steel (`main.js`, `fog.js`): clash and parry stop time for 13 frames, throw 110 droplets, blink the
   picture white (`u.flash`) and punch the lens in by 6 degrees of field of view, both decaying within a few frames.
 
+## Round 18 (2026-11-15): the slice the owner wants, and its first two steps
+
+Owner: the feel is right now, fog density included. The slice: the player walks a forest path lined with bushes and
+trees, meets a few enemies on it, and at the end a gigantic enemy attacks; the player must use the different forms to
+run up onto its head and drive the sword in. Build it step by step.
+
+Plan: (1) refine the figure and make the cloth sit on it, (2) path, more trees, bushes, grass, (3) enemies placed
+along the path, (4) the giant at the path's end, (5) climbing it with the forms and the final stab.
+
+Done this round, steps 1 and 2:
+- Figure (`figure.js`): a solid robe skirt to mid-thigh, a shoulder mantle, neck and crossed collar under the
+  cloth; the torn hem now hangs from the skirt's rim; cloak strips start under the mantle; smoother limbs.
+  `Strips` has `stiff`: the first segment of each strip is held along its rest direction so cloth leaves the body
+  at a fixed angle instead of hinging on a point.
+- Scene (`world.js`, `stage.js`): `PATH` (6 points, south to north) and `pathDist()`; the terrain shader draws the
+  path as paler worn earth with a broken ink edge; 46 more pines standing 3.4 m back from the path; 240 bushes and
+  1300 grass tufts as instanced meshes, thicker near the path. Foliage shapes are smooth lumps (position-based
+  bumps), after per-vertex jitter looked like angular slabs up close.
+
+Not done: nothing collides with trees or bushes; the camera can pass through them; the demos do not walk the path;
+the path was not seen clearly in the stills (fog over it). Frame cost unchanged: 8.4 ms at 720p, 11.5 ms at 1080p.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

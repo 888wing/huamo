@@ -53,3 +53,15 @@ export function terrainTexture(gpu, n = 256) {
   gpu.device.queue.writeTexture({ texture: tex }, toHalf(bake(n)), { bytesPerRow: n * 2 }, [n, n]);
   return { tex, x0: -SIZE / 2, z0: -SIZE / 2, size: SIZE };
 }
+
+// The path through the forest, south to north, as a line of points (x, z).
+export const PATH = [[0, 24], [3, 15], [-4, 6], [5, -2], [-2, -11], [1, -22]];
+export function pathDist(x, z) {
+  let best = 1e9;
+  for (let i = 0; i < PATH.length - 1; i++) {
+    const [ax, az] = PATH[i], [bx, bz] = PATH[i + 1], dx = bx - ax, dz = bz - az;
+    const t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
+  }
+  return best;
+}
