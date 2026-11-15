@@ -2,7 +2,7 @@
 // depth edges, lets distance wash things towards paper, lays the fog over, and finishes on textured paper.
 import * as THREE from 'three/webgpu';
 import { Fn, vec2, vec3, vec4, float, uniform, texture, texture3D, screenUV, screenCoordinate, screenSize, pass, rtt, Loop, If, Break,
-  getViewPosition, perspectiveDepthToViewZ, interleavedGradientNoise, exp, max, min, length, mix, smoothstep, clamp, abs, floor, fract, dot } from 'three/tsl';
+  getViewPosition, perspectiveDepthToViewZ, interleavedGradientNoise, exp, max, min, length, mix, smoothstep, clamp, abs, floor, fract, dot, sin, cos, step, mod } from 'three/tsl';
 import { PAPER, INK } from './stage.js';
 import { FOG_TOP } from './world.js';
 import { VW, VH } from './veil.js';
@@ -127,13 +127,25 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     // one cell of the smoke atlas, repeated: 0-5 puffs, 6-8 wisps, 9-10 sheets, 11 fine detail
     const cell = (n, p) => texture(atlas, p.fract().mul(.96).add(.02).add(vec2(n % 4, Math.floor(n / 4))).div(vec2(4, 3))).level(0).r;
     const asp2 = screenSize.x.div(screenSize.y);
+    const rnd = (c, k) => sin(dot(c, vec2(127.1, 311.7)).add(k)).mul(43758.5453).fract();
+    // one picture per cell of a loose lattice, each with its own size, turn, place and choice of picture; some cells stay empty
+    const scatter = (q, seed, first, count) => {
+      const c = floor(q), f = q.fract().sub(.5);
+      const sc = mix(.74, 1, rnd(c, seed + 1)), ang = rnd(c, seed + 2).mul(6.283), cs = cos(ang), sn = sin(ang);
+      const h = f.sub(vec2(rnd(c, seed + 3).sub(.5), rnd(c, seed + 4).sub(.5)).mul(sc.oneMinus()).mul(.9));
+      const g = vec2(h.x.mul(cs).sub(h.y.mul(sn)), h.x.mul(sn).add(h.y.mul(cs))).div(sc).add(.5);
+      const n = floor(rnd(c, seed + 5).mul(count)).add(first);
+      const inside = step(0, g.x).mul(step(g.x, 1)).mul(step(0, g.y)).mul(step(g.y, 1)).mul(step(.16, rnd(c, seed + 6)));
+      return texture(atlas, clamp(g, 0, 1).mul(.96).add(.02).add(vec2(mod(n, 4), floor(n.div(4)))).div(vec2(4, 3))).level(0).r.mul(inside);
+    };
     for (const L of [...veils].reverse()) {
-      const s = texture(L.tex, uv).level(0);
-      const tap = o => texture(L.tex, uv.add(o)).level(0).z, e = .0045;
+      const s = texture(L.disp, uv).level(0);
+      const tap = o => texture(L.disp, uv.add(o)).level(0).z, e = .0045;
       const d = s.z.mul(.4).add(tap(vec2(e, 0)).add(tap(vec2(-e, 0))).add(tap(vec2(0, e * 1.8))).add(tap(vec2(0, -e * 1.8))).mul(.15));
       // the photographs ride on the layer: attached to it, pulled along by its flow, drifting slowly
-      const p = uv.sub(L.offU).sub(s.xy.mul(.00022)).mul(vec2(asp2, 1)).add(vec2(L.i * .37, L.i * .61)).add(vec2(u.time.mul(.006), 0));
-      const body = cell(9 + L.i % 2, p.mul(.9)).mul(.55).add(cell(L.i % 6, p.mul(1.6).add(.3)).mul(.9)).add(cell(6 + L.i % 3, p.mul(2.3)).mul(.5));
+      // the pictures are looked up where the smoke came from, so they bend and curl exactly as the fluid carried them
+      const p = uv.sub(L.offU).add(s.xy.div(vec2(VW, VH))).mul(vec2(asp2, 1)).add(vec2(L.i * .37, L.i * .61)).add(vec2(u.time.mul(.006), 0));
+      const body = cell(9 + L.i % 2, p.mul(.9)).mul(.55).add(scatter(p.mul(1.5), L.i * 17.3, 0, 6).mul(1.25)).add(scatter(p.mul(2.2).add(.5), L.i * 5.1 + 40, 6, 3).mul(.55));
       const fine = cell(11, p.mul(2.6));
       // the simulation says where the smoke is; the photographs give it body, and their fine detail eats into its edges
       const dd = max(d.mul(body.mul(1.5).add(.3)).sub(fine.oneMinus().mul(.22).mul(max(d.oneMinus(), 0))), 0);

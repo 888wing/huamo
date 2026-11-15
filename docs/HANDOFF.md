@@ -185,6 +185,23 @@ would help, then generated 12 greyscale smoke photographs to my spec (`assets/sm
 `dist/index.html`: 1046.6 KB raw, **347.6 KB gzip** (+98 KB for the atlas). Stills show real billowing puffs with
 wispy edges. Known: the puff cells repeat in a visible grid in places. Motion not judged frame by frame.
 
+## Round 14 (2026-11-15): pictures carried by the fluid, scattered puffs
+
+Owner approved both follow-ups.
+
+- Carried pictures: each layer now also advects a displacement field ("how far the smoke here has been carried",
+  `eI`/`eO` in `veil.wgsl`), relaxing back at 1.7/s and clamped to 90 texels. `project` writes displacement and
+  density into one texture (`E0`), which is the only texture the renderer reads per layer. `fog.js` looks the
+  photographs up at the displaced position, so they bend and curl exactly as the fluid moved, then settle.
+  With a slow relax (0.3/s) the ambient flow smeared every picture flat: keep it fast.
+- Scattered puffs (`scatter` in `fog.js`): one picture per lattice cell with its own size, rotation, offset and
+  choice of picture; 16 % of cells left empty. Replaces straight tiling for puffs and wisps.
+- The composite hit the default limit of 16 sampled textures per shader stage; density and displacement were merged
+  into one texture per layer, and `createDevice` now asks for up to 32 where the adapter allows.
+
+Stills of a stroke show the smoke swept into curved bands along the blade's arc and curled puffs afterwards.
+Not judged in motion.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

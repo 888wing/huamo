@@ -17,6 +17,9 @@ struct Params {
 @group(0) @binding(4) var dI: texture_2d<f32>;
 @group(0) @binding(5) var aO: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(6) var pO: texture_storage_2d<rgba16float, write>;
+// how far the smoke at each texel has been carried from where it started (texels): the renderer uses it to bend its pictures
+@group(0) @binding(7) var eI: texture_2d<f32>;
+@group(0) @binding(8) var eO: texture_storage_2d<rgba16float, write>;
 
 // smoke-shaped texture: layered soft noise, bent by itself, so the layer is made of puffs and gaps rather than a flat sheet
 fn h2(p: vec2f) -> f32 { return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453); }
@@ -33,6 +36,9 @@ fn at(t: texture_2d<f32>, p: vec2i) -> vec4f { return textureLoad(t, clamp(p, ve
   let dt = P_.a.z; let t = P_.a.w; let pos = vec2f(id) + .5;
   let here = textureLoad(aI, id, 0);
   let s = textureSampleLevel(aI, smp, (pos - here.xy * dt - P_.b.xy) / size, 0.);
+  let carried = textureSampleLevel(eI, smp, (pos - here.xy * dt - P_.b.xy) / size, 0.).xy;
+  // carried along with the flow, and slowly let go, so the pictures curl with the smoke and then settle back
+  textureStore(eO, id, vec4f(clamp((carried - here.xy * dt) * (1. - 1.7 * dt), vec2f(-90.), vec2f(90.)), 0., 0.));
   var v = s.xy;
   // smoke spreads a little every step, so its edges stay soft instead of hardening into outlines
   var d = mix(s.z, .25 * (at(aI, id + vec2i(2, 0)).z + at(aI, id - vec2i(2, 0)).z + at(aI, id + vec2i(0, 2)).z + at(aI, id - vec2i(0, 2)).z), .1);
@@ -68,4 +74,5 @@ fn at(t: texture_2d<f32>, p: vec2i) -> vec4f { return textureLoad(t, clamp(p, ve
   let s = textureLoad(aI, id, 0);
   let g = .5 * vec2f(at(pI, id + vec2i(1, 0)).x - at(pI, id - vec2i(1, 0)).x, at(pI, id + vec2i(0, 1)).x - at(pI, id - vec2i(0, 1)).x);
   textureStore(aO, id, vec4f(s.xy - g, s.z, 0.));
+  textureStore(eO, id, vec4f(textureLoad(eI, id, 0).xy, s.z, 0.)); // what the renderer reads: displacement and density in one texture
 }

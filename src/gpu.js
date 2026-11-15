@@ -4,7 +4,8 @@ export async function createDevice() {
   const adapter = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('This page needs WebGPU (desktop Chrome or Edge).');
   // three checks for 'core-features-and-limits', and the sims use float32-filterable and timestamp-query when present
-  const device = await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+  // the final composite samples one texture per smoke layer on top of the scene's own: ask for more than the default 16 where available
+  const device = await adapter.requestDevice({ requiredFeatures: [...adapter.features], requiredLimits: { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 32) } });
   device.addEventListener('uncapturederror', e => console.error('GPU: ' + e.error.message));
   return { adapter, device };
 }

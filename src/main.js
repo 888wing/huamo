@@ -42,7 +42,7 @@ async function boot() {
   // five layers of smoke between 2.6 and 18 m from the camera; the first two lie between the camera and the figure
   const veils = await Promise.all([[1.3, 2.0, 1, .5, 80], [2.0, 2.4, 1, .6, 75], [2.7, 2.7, 1, .7, 70], [3.4, 3.0, 1, .8, 65], [4.2, 3.2, 1, .9, 60], [5.2, 3.4, 1, 1.0, 55], [7.4, 3.4, .98, 1.1], [10, 3.8, .96, 1.2], [14, 4.2, .94, 1.25], [19, 4.6, .9, 1.25]]
     .map(([d, k, tone, amount, turb = 36], i) => Veil.create(gpu, i, { d, k, tone, amount, turb }))); // the nearest is thin, restless wisps right in front of the lens
-  veils.forEach(v => { v.tex = external(v.A); });
+  veils.forEach(v => { v.tex = external(v.A); v.disp = external(v.E0); });
   // the photographed smoke (12 pictures in one atlas) that gives the simulated layers their body and edges
   const bmp = await createImageBitmap(await (await fetch(atlasUrl)).blob());
   const atlasTex = gpu.tex([bmp.width, bmp.height], 'rgba8unorm', GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT);
