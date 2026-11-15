@@ -128,11 +128,9 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
       const lit = tap(vec2(-.012, -.02));
       // thin smoke barely shows and thick smoke never quite closes: edges are a long fade, not a line
       // fine texture inside the smoke, dragged along by the layer's own flow
-      const dd = d.mul(texture3D(noise, vec3(uv.mul(vec2(13, 8)).add(texture(L.tex, uv).level(0).xy.mul(.0009)), L.d * .21)).level(0).g.mul(.9).add(.55));
+      const dd = d.mul(texture3D(noise, vec3(uv.mul(vec2(2.6, 1.7)).add(texture(L.tex, uv).level(0).xy.mul(.0004)), L.d * .21)).level(0).r.mul(.8).add(.6)); // broad and soft: the noise texture is small, so it must not be magnified into flakes
       const a0 = float(1).sub(exp(dd.mul(dd).div(dd.add(.18)).mul(-L.k))).mul(.94);
-      // and along that fade the smoke breaks into drifting strands
-      const strand = texture3D(noise, vec3(uv.x.mul(8).add(L.d * .37), uv.y.mul(8).sub(u.time.mul(.02)), L.d * .13 + .2).add(vec3(d.mul(.6), 0, u.time.mul(.011)))).level(0).b;
-      const a = a0.mul(mix(1, smoothstep(.2, .75, strand), a0.oneMinus().mul(a0).mul(3.2))).mul(smoothstep(L.d, L.d + 1.4, z));
+      const a = a0.mul(smoothstep(L.d, L.d + 1.4, z));
       // shade only where thicker smoke stands between this point and the light; edges get no brightening, so no ring forms around a puff
       col.assign(mix(col, u.paper.mul(clamp(float(1.02).sub(max(lit.sub(d), 0).mul(.6)), .62, 1.02)).mul(L.tone), a));
     }
