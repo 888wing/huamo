@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { length, mix, mrt, positionWorld, smoothstep, texture3D, uniform, uv } from 'three/tsl';
+import { length, max, mix, mrt, positionWorld, smoothstep, texture3D, uniform, uv } from 'three/tsl';
 import { height } from './world.js';
 import { wash } from './stage.js';
 
@@ -63,6 +63,30 @@ export function buildGroundInk(scene, noise) {
         pool.age.value += dt;
         if (pool.age.value >= duration) pool.mesh.visible = false;
       }
+    },
+  };
+}
+
+// Where the giant's hand is about to come down: a ring of ink on the ground, filling in as the arm goes up.
+// Marked in the subject matte like the ground ink, so it shows through the fog.
+export function buildBlot(scene, noise) {
+  const geometry = new THREE.PlaneGeometry(2, 2, 12, 12), grow = uniform(0), strength = uniform(0);
+  const material = new THREE.MeshBasicNodeMaterial({ transparent: true, alphaTest: .02, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const grain = texture3D(noise, positionWorld.mul(.9)), d = length(uv().sub(.5).mul(2)).add(grain.r.sub(.5).mul(.16));
+  const ring = smoothstep(.09, 0, d.sub(.9).abs()), fill = smoothstep(grow.mul(.9), grow.mul(.9).sub(.18), d).mul(.5);
+  material.opacityNode = max(ring.mul(.85), fill).mul(strength);
+  material.mrtNode = mrt({ subjectMask: smoothstep(.12, .3, material.opacityNode).mul(.5) }); // at full weight in the matte: it has to be read through the fog
+  material.colorNode = wash(grain.g.mul(.1));
+  const mesh = new THREE.Mesh(geometry, material); mesh.visible = false; mesh.frustumCulled = false; scene.add(mesh);
+  let last = '';
+  return {
+    // at: the centre on the ground, radius in metres, k: 0..1 how far the arm is up (0 hides it)
+    set(at, radius, k) {
+      mesh.visible = k > .01; strength.value = Math.min(1, k * 3); grow.value = k; if (!mesh.visible) return;
+      const key = at[0].toFixed(2) + at[2].toFixed(2); if (key === last) return; last = key;
+      const { position, uv: coords } = geometry.attributes;
+      for (let i = 0; i < position.count; i++) { const x = at[0] + (coords.getX(i) - .5) * 2 * radius * 1.12, z = at[2] + (coords.getY(i) - .5) * 2 * radius * 1.12; position.setXYZ(i, x, height(x, z) + .04, z); }
+      position.needsUpdate = true;
     },
   };
 }

@@ -1,6 +1,6 @@
 // The fighters. The player is one body with four forms; each form moves differently and pushes on the fog differently.
 // The enemy is an ink shadow of the swordsman that closes in, shows its strike before it comes, and can be cut down.
-import { height, SIZE, FOG_TOP, FIGHT_STATIONS, pushOut, START } from './world.js';
+import { height, SIZE, FOG_TOP, FIGHT_STATIONS, pushOut, START, PILLARS } from './world.js';
 
 export const FORMS = ['人 斬', '虎 吼', '鶴 翼', '鯉 游'];
 const SPEED = [5.5, 12, 11, 7.5], ACT = [0.36, 0.35, 0.7, 0.5], COOL = [0.62, 1.4, 0.9, 1.2];
@@ -90,6 +90,44 @@ export class Player {
     this.events = [];                                                      // what the caller turns into fog, shake and sound: jump, land, plunge, down
     this.ink = 1; this.free = false;                                       // free: a form set directly (demos, debug keys) does not drain
     this.morphT = 0; this.morphFrom = 0; this.guardTap = 9; this.guardWas = false;
+    this.ride = null;                                                      // carried: { kind: 'arm' | 'shoulder' | 'head' | 'rock', ... }
+  }
+  // Carried by something. As the tiger: up the giant's arm while it lies on the ground, and up a rock face. Then standing on
+  // its shoulder; and at the end kneeling on its head over the sword. Returns false when the ride has ended this step.
+  riding(dt, jumpPressed) {
+    const R = this.ride, g = this.boss, { p, v } = this, len = a => Math.hypot(a[0], a[1], a[2]);
+    const leave = (vx, vy, vz) => { this.ride = null; this.ground = false; this.airT = .15; v[0] = vx; v[1] = vy; v[2] = vz; return false; };
+    const moveTo = q => { for (let i = 0; i < 3; i++) { v[i] = Math.max(-14, Math.min(14, (q[i] - p[i]) / Math.max(dt, 1e-3))); p[i] = q[i]; } };
+    if (R.kind === 'arm') {
+      const ramp = g?.ramp; if (!ramp || this.form !== 1) return leave(0, 2, 0);                       // the arm has lifted, or the tiger is spent: off it comes
+      const [h, e, sh] = ramp, d1 = [e[0] - h[0], e[1] - h[1], e[2] - h[2]], d2 = [sh[0] - e[0], sh[1] - e[1], sh[2] - e[2]], l1 = len(d1), l2 = len(d2);
+      R.s = Math.min(1, R.s + 7 * dt / (l1 + l2));
+      const d = R.s * (l1 + l2), on2 = d >= l1, a = on2 ? e : h, dir = on2 ? d2 : d1, k = on2 ? (d - l1) / l2 : d / l1;
+      moveTo([a[0] + dir[0] * k, a[1] + dir[1] * k + .85, a[2] + dir[2] * k]);                         // along the top of the arm
+      this.yaw = Math.atan2(dir[0], dir[2]); R.slope = Math.asin(dir[1] / len(dir)); this.phase += dt * 9;
+      if (R.s >= 1) { this.ride = { kind: 'shoulder', t: 0, slope: 0 }; this.events.push({ kind: 'shoulder', at: [...p] }); }
+      return true;
+    }
+    if (R.kind === 'shoulder') {
+      const P = g?.parts; if (!P || !g.alive) return leave(0, 2, 0);
+      const sh = P['shoulder' + (g.side > 0 ? 'L' : 'R')], hx = P.head[0] - sh[0], hz = P.head[2] - sh[2], hl = Math.hypot(hx, hz) || 1; R.t += dt;
+      moveTo([sh[0], sh[1] + 1.0, sh[2]]); v.fill(0); this.yaw = Math.atan2(hx, hz);
+      if (jumpPressed) { this.events.push({ kind: 'jump', at: [...p] }); return leave(hx / hl * 3, 10.5, hz / hl * 3); }   // the leap towards its head
+      if (R.t > 2.8 || this.form === 0) return leave(-hx / hl * 5, 4, -hz / hl * 5);                   // shrugged off
+      return true;
+    }
+    if (R.kind === 'head') { // on its head with the sword in it, until it starts to fall
+      const P = g?.parts; if (!P || g.mode === 'dead') return leave(0, 3, 0);
+      moveTo([P.crown[0], P.crown[1], P.crown[2]]); v.fill(0); this.plunge = 2; this.plungeT = .12;
+      if (g.death > .4) { this.plunge = 0; this.yaw = g.yaw + 1.57; return leave(Math.cos(g.yaw) * 7, 7, -Math.sin(g.yaw) * 7); }   // it is going over: off to one side, clear of where it will lie
+      return true;
+    }
+    // a rock face: straight up it, belly to the stone, and over the lip onto the top
+    const [cx, cz, r, top] = PILLARS[R.i]; if (this.form !== 1) return leave(R.rx * 3, 1, R.rz * 3);
+    R.y += 8 * dt; this.yaw = Math.atan2(-R.rx, -R.rz); R.slope = 1.4; this.phase += dt * 9;
+    if (R.y >= top) { moveTo([cx + R.rx * (r - 1.1), top, cz + R.rz * (r - 1.1)]); this.ride = null; this.ground = true; v.fill(0); this.events.push({ kind: 'land', at: [...p], v: 3 }); return false; }
+    moveTo([cx + R.rx * (r + .3), R.y, cz + R.rz * (r + .3)]);
+    return true;
   }
   // Into a beast, out of the move in progress. The body keeps the speed it had.
   shift(f) {
@@ -122,7 +160,7 @@ export class Player {
   // untouchable: inside a dodge's window, while getting up, while changing form
   get invuln() {
     const e = this.dodgeDur - this.dodge, w = this.dodgeKind === 1 ? HOP : ROLL;
-    return (this.dodge > 0 && (this.dodgeKind === 3 || (e > w[2] && e < w[3]))) || this.ko >= 2 || this.burst > 0 || this.fallen > 0 || this.morphT > 0;
+    return (this.dodge > 0 && (this.dodgeKind === 3 || (e > w[2] && e < w[3]))) || this.ko >= 2 || this.burst > 0 || this.fallen > 0 || this.morphT > 0 || !!this.ride || !!this.staged;
   }
   // A blow lands. kind: 1 a cut (a flinch), 2 a heavy blow (a stumble), 3 thrown off the feet. Returns true if it kills.
   hurt(kind, from, power, back) {
@@ -145,7 +183,7 @@ export class Player {
       run: Math.min(1, Math.hypot(v[0], v[2]) / SPEED[this.form]), act: this.actT, combo: this.combo, side: this.side, windup: 0, stagger: 0,
       guardK: this.guardK, blockT: this.blockT, parryT: this.parryT, dodgeKind: this.dodge > 0 ? this.dodgeKind : 0, dodgeU: 1 - this.dodge / this.dodgeDur,
       hurtU: this.hurtT > 0 ? 1 - this.hurtT / this.hurtDur : -1, hurtKind: this.hurtKind, hurtDir: this.hurtDir, ko: this.ko, koT: this.koT,
-      plunge: this.plunge, plungeT: this.plungeT, death: this.fallen > 0 ? 1 - this.fallen / DEATH : 0, fade, time, form: this.form };
+      plunge: this.plunge, plungeT: this.plungeT, death: this.fallen > 0 ? 1 - this.fallen / DEATH : 0, fade, time, form: this.form, slope: this.ride?.slope ?? 0 };
   }
   // a form set directly, for demos and debugging: no gauge, no time limit
   setForm(f) { if (f !== this.form) { this.form = f; this.free = f !== 0; this.act = 0; this.combo = 0; this.clearCombo(); this.burst = BURST; this.shake = .25; this.morphT = 0; } } // momentum carries over
@@ -192,6 +230,15 @@ export class Player {
       // the carp at the surface leaps clear of the fog and falls back in an arc
       if (f === 3 && jumpPressed && p[1] > FOG_TOP - .5 && p[1] <= FOG_TOP - .29) { v[1] = 9.5; p[1] = FOG_TOP - .29; this.events.push({ kind: 'breach', at: [...p] }); }
     } else if (f === 0) this.ink = Math.min(1, this.ink + dt / REFILL);
+    if (this.ride && this.riding(dt, jumpPressed)) { this.t += dt; this.act = 0; this.dodge = 0; return; }
+    if (f === 1 && this.ground && !this.ride) { // the tiger takes to anything it can run up
+      const ramp = this.boss?.ramp;
+      if (ramp && Math.hypot(p[0] - ramp[0][0], p[2] - ramp[0][2]) < 2.6) { this.ride = { kind: 'arm', s: 0, slope: 0 }; this.events.push({ kind: 'mount', at: [...p] }); }
+      else PILLARS.forEach(([cx, cz, r, top], i) => {
+        const dx = p[0] - cx, dz = p[2] - cz, d = Math.hypot(dx, dz);
+        if (!this.ride && d < r + .9 && p[1] < top - 1.5 && (inp.x || inp.z) && Math.sin(this.yaw) * -dx + Math.cos(this.yaw) * -dz > .6 * d) { this.ride = { kind: 'rock', i, y: p[1], rx: dx / d, rz: dz / d, slope: 1.4 }; this.events.push({ kind: 'mount', at: [...p] }); }
+      });
+    }
     // thrown off the feet: nothing answers until it has landed, lain a moment and got up; a press of jump in the air lands it standing
     const helpless = this.ko > 0 || this.plunge === 2;
     if (this.ko) {
@@ -248,8 +295,16 @@ export class Player {
     } else {
       v[1] -= (this.plunge === 1 ? 46 : 22) * dt;
       // a tap is a low jump, a held press a high one: letting go on the way up cuts the rise short
-      if (!inp.up && v[1] > 2 && !this.ko && this.airT > .04) v[1] -= 55 * dt;
-      if (this.ground && jumpPressed && this.stagger <= 0 && this.land <= 0 && !helpless) { v[1] = f === 1 ? 10 : 8.6; this.ground = false; this.airT = 0; this.dodge = 0; this.events.push({ kind: 'jump', at: [...p] }); }
+      if (this.hop && !inp.up && v[1] > 2 && !this.ko && this.airT > .04) v[1] -= 55 * dt;   // (only a jump off the ground: not a leap from a shoulder, a throw, or the carp's flight)
+      if (this.ground && jumpPressed && this.stagger <= 0 && this.land <= 0 && !helpless) { v[1] = f === 1 ? 10 : 8.6; this.ground = false; this.airT = 0; this.dodge = 0; this.hop = true; this.events.push({ kind: 'jump', at: [...p] }); }
+    }
+    if (this.plunge === 1 && this.boss?.alive && this.boss.awake && this.boss.parts) { // the stab coming down over the giant's head finds it
+      const c = this.boss.parts.crown, dx = c[0] - p[0], dz = c[2] - p[2], d = Math.hypot(dx, dz);
+      if (d < 4.5 && p[1] > c[1] - .5) { const k = Math.min(9, d * 7) / (d || 1); v[0] = dx * k; v[2] = dz * k; }
+      if (d < 1.9 && p[1] <= c[1] + .3 && p[1] > c[1] - 2.5) {
+        this.ride = { kind: 'head', slope: 0 }; this.plunge = 2; this.plungeT = 0; v.fill(0); this.events.push({ kind: 'headstab', at: [...c] }); this.boss.die();
+        this.t += dt; return;
+      }
     }
     walk(p, v, dt, flying || swimming ? 0.2 : 0.7);
     p[1] += v[1] * dt;
@@ -261,10 +316,10 @@ export class Player {
         if (this.plunge === 1) { this.plunge = 2; this.plungeT = 0; this.plungeHit = true; v[0] = v[2] = 0; this.events.push({ kind: 'plunge', at: [...p], v: fallSpeed }); }
         else if (!this.ko) { this.landHard = fallSpeed > 13; this.land = this.landHard ? .4 : .14; this.events.push({ kind: 'land', at: [...p], v: fallSpeed }); }
       }
-      this.airT = 0;
+      this.airT = 0; this.hop = false;
     } else this.airT += dt;
     if (this.plunge === 2 && (this.plungeT += dt) > .38) this.plunge = 0;
-    if (flying) p[1] = Math.min(p[1], 8);
+    if (flying) p[1] = Math.min(p[1], 16); // high enough to clear the giant's head
     if (swimming) p[1] = Math.min(p[1], FOG_TOP - .3);
     const sp = Math.hypot(v[0], v[2]);
     // face the way we move, except backing off in a hop, being thrown, or reeling

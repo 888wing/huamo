@@ -281,6 +281,7 @@ export class Figure {
         const rem = (1 - f.t) * f.T, tx = hx + v[0] * rem + dx * ahead, tz = hz + v[2] * rem + dz * ahead, e = f.t * f.t * (3 - 2 * f.t);
         f.pos.set(f.from.x + (tx - f.from.x) * e, 0, f.from.z + (tz - f.from.z) * e);
         f.pos.y = height(f.pos.x, f.pos.z) + (.05 + .17 * Math.min(1, sp / 5.5)) * Math.sin(Math.PI * f.t);
+        if (f.t >= 1) f.landed = true; // for whoever wants to hear it
       }
     }
   }

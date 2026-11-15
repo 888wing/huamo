@@ -479,6 +479,88 @@ from round 22). Whole frame, tour demo: 8.3 ms at 720p, 11.2 ms at 1080p. `dist/
 Not done: the beasts' rigs and motion are as they were in round 4 (step 4 is next); the tiger does not yet run on
 surfaces; a beast has no reaction of its own to a blow, it just reverts. Seen as frame strips and two recordings.
 
+## Rounds 24-25 (2026-11-15): the beasts' bodies; the giant staged, climbed and killed
+
+The owner: "implement everything in the plan". Steps 4-7 of [PLAN-NEXT.md](PLAN-NEXT.md); sound is left for after.
+
+Step 4, `beasts.js` rewritten:
+- Tiger: pelvis -> loin -> chest spine that arches and flattens through the gallop, three-segment legs with paws
+  (the two of a pair land 0.38 rad apart), shoulder blades, a moment off the ground, a lean and a spine bend into
+  turns, `st.slope` to pitch the whole body along a surface.
+- Crane: wings of three bones; the outer wing drops on the upstroke; glides when fast and level (`C.glide`), banks
+  by its turn rate, tucks and sweeps the wings back to dive, legs come down near the ground.
+- Carp: seven vertebrae, a five-strip tail, dorsal, pectoral, pelvic fins, barbels; rolls into turns; at the fog's
+  surface jump throws it clear (`breach`) and it follows its arc nose first.
+- Off the ground as tiger or carp, jump pressed again hands on to the crane. The crane's ceiling is 16 m (was 8).
+
+Steps 5-7:
+- **The giant's new moves** (`boss.js`): `sweep` (the hand goes down at its own side, then scythes across the front
+  in 0.42 s; 1 damage to whoever is under 1.25 m off the ground where it passes), `charge` (a wrestler's start for
+  1 s, then 6.5 m forward in 0.55 s; 2 damage) and `back` (paces backwards to its mark). A cut on the lying hand
+  pins the arm for `STUN` = 3 s, once per slam. `die()` -> `dying` (`DYING` = 6.5 s: reel, sway, fall like a tree
+  at 56 %, flatten and run out) -> `dead`. `ramp` is the arm lying on the ground as hand, elbow, shoulder.
+  `volumes()` are spheres a flying body cannot pass. A stamp throws a carp within 6.5 m out of the fog at 17 m/s
+  (`gate`). The carp under the fog, and anyone riding, cannot be hit.
+- **Riding** (`Player.riding`, `ride` = arm | shoulder | head | rock): the tiger takes the lying arm when within
+  2.6 m of the hand and runs up it at 7 m/s, body pitched along it; then stands on the shoulder (jump = a leap
+  towards the head; shrugged off after 2.8 s); the tiger also takes any rock pillar it faces while driven at it and
+  runs up the face at 8 m/s. The stab from the air homes on the crown within 4.5 m and, on reaching it, plants the
+  swordsman on the head and kills the giant; he jumps off sideways as it starts to fall.
+- **Staging** (`main.js`): the entrance (5.6 s, any key skips it, input locked and the player untouchable): camera
+  low before the giant as it rises, sliding aside, FOV 50 -> 62, a little roll, then back; black bars; the name
+  「巨相撲鬼」 with a "Boss" seal slammed on at 3 s. The kill: slowed time, the camera round the head, ink out of the
+  wound, a vermilion 「斬」. The end: the fog lifts (`kFog`, veil amounts), a card with the seal, R reloads. The bars,
+  name and card are moved a step each frame, not by CSS transitions, so stepped captures match play.
+- **Comic lines** (`fog.js`, uniforms `mangaC`, `focus`, `burst`, `slash`, `slashDir`, `invert`): wedges of ink
+  closing in on a raised limb, thrown outwards from a blow, streaks along a falling hand, and the picture inverted
+  for two frames on impact.
+- **Brush characters** stamped at blows (DOM, the gauge's turbulence filter): 吼 轟 砰 鏘 斬.
+- **The blot** (`buildBlot` in `combat-fx.js`): a ring on the ground where the open hand will land, filling as the
+  arm goes up, marked in the subject matte so it reads through fog.
+- Demos `beasts`, `climb`, `pillar`, `gate`, `far`; `tools/check-climb.mjs [climb|pillar|gate]`.
+
+Measured (`check-climb.mjs`, procedural build): all three ways kill it. Arm: hand pinned at 12.9 s, tiger and on the
+arm 13.3 s, shoulder 13.9 s, crane 14.4 s, sword in its head 14.9 s (2.0 s from the pin), dead 22.8 s, end card
+25.0 s. Rock: tiger 6.0 s, on the rock 6.2 s, crane 7.6 s, head 8.6 s. Carp: under the fog 8.0 s, thrown clear 8.9 s,
+crane 9.0 s, head 10.2 s. In each the scripted player took no damage.
+Regression on the procedural build, no console errors: `spar`, `ward`, `journey` to 110 s, `boss` (now with sweeps:
+5 stamps, 2 slams, 8 sweeps in 60 s), `stand`, `moves` and `shift` (numbers unchanged), the arm route again on the
+photo build. Whole frame: tour demo 8.4 ms at 720p and 11.0 ms at 1080p; the kill by the arm, start to end card,
+9.2 ms and 12.8 ms.
+
+## Round 26 (2026-11-15): sound
+
+The owner asked for sound only after every visual was done. `src/sound.js`: 23 voices made in code, no recordings.
+Each is a few oscillators and filtered noise with an envelope, written against whatever context it is given, so the
+same code plays live and renders offline (`renderVoice`) for measuring. Steps (from the planted feet's `landed`
+flag), the blade as it snaps through, cuts, steel, blocks, hurts, jump, landing, roll, the change of form, wings, the
+tiger's roar, the carp's splash, the giant's footfall, stamp, slam, sweep, roar and waking rumble, the stab into its
+head, and a plucked string (a tick of noise round a short delay) played sparsely while the giant is not up and as a
+three-note close at the end. A wind bed follows the player's speed. One compressor and a generated two-second room.
+The context starts on the first key or click; `M` mutes; `?mute`.
+
+Measured by `tools/check-sound.mjs`: all 23 voices render with a raw peak between 0.08 and 1.06 and none silent; with
+a key pressed in headless Chrome the audio context runs and the whole kill plays through with no errors.
+**Nobody has listened to any of it**: levels are measured, the character of the sounds is not judged.
+
+Found on the way: a low-pass filter's `Q` is in decibels in Web Audio, and its default lifts the cutoff by 1 dB.
+Inside the plucked string's feedback loop that made the loop gain more than one: the offline render peaked at
+3.8e17. `Q = -3.01` is flat. It was only caught because the voices are rendered and measured.
+
+Sizes after everything: `dist/smoke-procedural.html` 1022.2 KB raw, **300.5 KB gzip**; `dist/index.html` 395.3 KB gzip.
+
+Bugs found on the way:
+- The cut on the lying hand re-armed the stun every time it landed, so a player who kept cutting held the giant down
+  for ever. It now pins once per slam.
+- The jump-height cut (extra gravity when jump is not held) also killed the carp's launch and would have killed any
+  throw upwards. It now applies only to a jump off the ground (`hop`).
+- The tiger could not take a rock: `walk()` zeroes velocity against a wall before the "moving towards it" test.
+  The test uses facing and input instead.
+- Double quotes in a font list broke `style=""` attributes built as strings: the end card rendered at 13 px.
+
+Not done from the plan: the giant's free hand does not swat at the crane; trees do not shake at a stamp; the charge
+was looked at only from far off through trees; nothing has been played by hand.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

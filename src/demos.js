@@ -1,5 +1,5 @@
 // Scripted runs for repeatable captures: each sets the player's form and input over time and may pin the camera.
-import { DUEL_CLEARING, height, START } from './world.js';
+import { DUEL_CLEARING, height, START, PILLARS } from './world.js';
 
 const place = (player, x, z, y) => { player.p[0] = x; player.p[2] = z; player.p[1] = y ?? height(x, z); player.v.fill(0); };
 const once = (player, key, fn) => { if (!player['_' + key]) { player['_' + key] = true; fn(); } };
@@ -253,6 +253,81 @@ export const DEMOS = {
     cam.fixed = { pos: [p[0], height(cx, cz) + 1.3 + lift, p[2] + 5.2], look: [p[0], height(cx, cz) + .9 + lift, p[2]] };
     let clock = 0;
     for (const [name, d] of BEAST_SEQ) { if (t < clock + d) { each[name]?.(); player.demoStep = name; break; } clock += d; }
+  },
+  // The kill by the main route (pass ?boss): survive until the giant throws its hand down, cut the hand so the arm stays,
+  // roll at it and roll again into the tiger, up the arm to the shoulder, leap, jump again into the crane, over the head,
+  // and attack: back into the swordsman and down on the point of the sword.
+  climb(t, player, cam, inp) {
+    once(player, 's', () => { place(player, 3.6, -3.8); player.setForm(0); player.burst = 0; player.yaw = Math.PI; cam.yaw = Math.PI - .16; player.cs = {}; });
+    const g = player.boss, P = g.parts, p = player.p, c = player.cs, dx = g.p[0] - p[0], dz = g.p[2] - p[2], d = Math.hypot(dx, dz);
+    let a = Math.atan2(dx, dz) + (g.awake ? .5 : 0) - cam.yaw; a = Math.atan2(Math.sin(a), Math.cos(a)); cam.yaw += a * Math.min(1, 2.5 / 60); cam.pitch = player.form === 2 || player.ride ? .05 : -.3;
+    inp.x = inp.z = inp.up = inp.down = 0; inp.dodge = inp.act = inp.guard = false;
+    const F = [Math.sin(cam.yaw), Math.cos(cam.yaw)], to = (q, k = 1) => { const hx = q[0] - p[0], hz = q[2] - p[2], hd = Math.hypot(hx, hz) || 1; inp.z = (hx * F[0] + hz * F[1]) / hd * k; inp.x = (hx * -F[1] + hz * F[0]) / hd * k; return hd; };
+    const tap = (key, at, len = .05) => t >= at && t < at + len;     // a press that lasts three frames
+    if (!g.alive || !P) return;
+    if (player.ride?.kind === 'shoulder') { c.on ??= t; if (tap('up', c.on + .3)) inp.up = 1; return; }               // on its shoulder: leap
+    if (player.ride) return;
+    if (player.form === 2) { // the crane: up over the crown, then down on it
+      const hd = to(P.crown, Math.min(1, Math.hypot(P.crown[0] - p[0], P.crown[2] - p[2]) * .5)), high = p[1] > P.crown[1] + 2;
+      inp.up = p[1] < P.crown[1] + 2.6 ? 1 : 0; if (hd < 1.3 && high) inp.act = true;
+      return;
+    }
+    if (c.on && player.form === 1 && !player.ground) { c.air ??= t; if (tap('up', c.air + .12)) inp.up = 1; return; }   // off the shoulder, in the air: the crane
+    if (c.on) return;
+    if (g.mode === 'sleep' || g.mode === 'rise') { inp.z = d > 9.5 ? 1 : 0; return; }
+    if (g.planted) {
+      const hand = P[g.side > 0 ? 'handL' : 'handR'];
+      if (player.form === 1) { to(hand); return; }                                                                         // the tiger makes for the hand and takes the arm
+      const hd = to(hand, 1);
+      if (!g.pinned) { if (hd < 3.4) { inp.x = inp.z = 0; inp.act = (t * 2.5) % 1 < .2; } return; }                         // cut the hand: the arm stays down
+      c.roll ??= t + .15; to(hand); if (tap('dodge', c.roll) || tap('dodge', c.roll + .14)) inp.dodge = true;               // roll at it, and again: the tiger
+      return;
+    }
+    c.roll = undefined;
+    inp.z = d > 6.2 ? 1 : d < 4.8 ? -1 : 0;
+    if (g.mode === 'slam' && g.wind > .55 && g.fall < 1) { inp.x = g.side; inp.dodge = g.wind > .95 && g.fall < .1; }    // out from under the hand
+    if (g.mode === 'sweep' && g.wind > .9) inp.up = 1;                                                                    // over the sweeping hand
+    if (g.ring) { const rd = Math.hypot(p[0] - g.ring.at[0], p[2] - g.ring.at[2]); inp.up = rd - g.ring.r < 3.2 && rd > g.ring.r ? 1 : 0; }
+  },
+  // Another way up (pass ?boss): as the tiger up the rock at the clearing's edge, off its top, into the crane, across to the head.
+  pillar(t, player, cam, inp) {
+    const g = player.boss, P = g.parts, p = player.p, [cx, cz, r, top] = PILLARS[5];
+    once(player, 's', () => { place(player, 5.5, -9.5); player.setForm(0); player.burst = 0; player.yaw = Math.PI; cam.yaw = Math.PI; player.cs = {}; });
+    const c = player.cs; let a = Math.atan2(g.p[0] - p[0], g.p[2] - p[2]) - cam.yaw; a = Math.atan2(Math.sin(a), Math.cos(a)); cam.yaw += a * Math.min(1, 2 / 60); cam.pitch = p[1] > 5 ? -.1 : -.25;
+    inp.x = inp.z = inp.up = inp.down = 0; inp.dodge = inp.act = inp.guard = false;
+    const F = [Math.sin(cam.yaw), Math.cos(cam.yaw)], to = (q, k = 1) => { const hx = q[0] - p[0], hz = q[2] - p[2], hd = Math.hypot(hx, hz) || 1; inp.z = (hx * F[0] + hz * F[1]) / hd * k; inp.x = (hx * -F[1] + hz * F[0]) / hd * k; return hd; };
+    const tap = (at, len = .05) => t >= at && t < at + len;
+    if (!g.alive || !P || player.ride || player.plunge || player.staged) return;
+    if (player.form === 2) { const hd = to(P.crown, Math.min(1, Math.hypot(P.crown[0] - p[0], P.crown[2] - p[2]) * .5)); inp.up = p[1] < P.crown[1] + 2.6 ? 1 : 0; if (hd < 1.3 && p[1] > P.crown[1] + 2) inp.act = true; return; }
+    if (p[1] > top - .5) { c.top ??= t; if (player.ground) { to([g.p[0], 0, g.p[2]]); if (tap(c.top + .35)) inp.up = 1; } else { c.air ??= t; if (tap(c.air + .14)) inp.up = 1; } return; }   // on top: run, leap, and again: the crane
+    if (!g.awake || g.mode === 'rise') { inp.z = Math.hypot(g.p[0] - p[0], g.p[2] - p[2]) > 11 ? 1 : 0; return; }
+    c.go ??= t; const hd = to([cx, 0, cz]);                                                         // make for the rock: roll, roll again into the tiger, and it takes the face
+    if (player.form === 0 && hd < 8 && (tap(c.go + .2) || tap(c.go + .34))) inp.dodge = true;
+  },
+  // And the third (pass ?boss): 鯉躍龍門. Under the fog as the carp beside its foot; the stamp throws the carp clear, and in the air it becomes the crane.
+  gate(t, player, cam, inp) {
+    const g = player.boss, P = g.parts, p = player.p;
+    once(player, 's', () => { place(player, 3.6, -3.8); player.setForm(0); player.burst = 0; player.yaw = Math.PI; cam.yaw = Math.PI - .16; player.cs = {}; });
+    const c = player.cs; let a = Math.atan2(g.p[0] - p[0], g.p[2] - p[2]) + .4 - cam.yaw; a = Math.atan2(Math.sin(a), Math.cos(a)); cam.yaw += a * Math.min(1, 2 / 60); cam.pitch = player.form === 2 ? 0 : -.3;
+    inp.x = inp.z = inp.up = inp.down = 0; inp.dodge = inp.act = inp.guard = false;
+    const F = [Math.sin(cam.yaw), Math.cos(cam.yaw)], to = (q, k = 1) => { const hx = q[0] - p[0], hz = q[2] - p[2], hd = Math.hypot(hx, hz) || 1; inp.z = (hx * F[0] + hz * F[1]) / hd * k; inp.x = (hx * -F[1] + hz * F[0]) / hd * k; return hd; };
+    const tap = (at, len = .05) => t >= at && t < at + len, d = Math.hypot(g.p[0] - p[0], g.p[2] - p[2]);
+    if (!g.alive || !P || player.plunge || player.ride || player.staged) return;
+    if (player.form === 2) { const hd = to(P.crown, Math.min(1, Math.hypot(P.crown[0] - p[0], P.crown[2] - p[2]) * .5)); inp.up = p[1] < P.crown[1] + 2.6 ? 1 : 0; if (hd < 1.3 && p[1] > P.crown[1] + 2) inp.act = true; return; }
+    if (player.form === 3) { if (p[1] > 5) { c.air ??= t; if (tap(c.air)) inp.up = 1; } else if (d > 4.2) to([g.p[0], 0, g.p[2]], .6); return; }   // thrown clear: the crane. Else stay by its feet
+    if (g.mode === 'sleep' || g.mode === 'rise') { inp.z = d > 9.5 ? 1 : 0; return; }
+    // wait out of reach until it raises a leg, then go under the fog beside it (guard, guard) and let the stamp do the rest
+    if (g.mode === 'stomp' && g.lift > .15 && g.lift < 1 || c.dive) { c.dive ??= t; if (d > 5) to([g.p[0], 0, g.p[2]]); if (tap(c.dive + .25) || tap(c.dive + .4)) inp.guard = true; return; }
+    inp.z = d > 7.5 ? 1 : d < 6.2 ? -1 : 0;
+    if (g.ring) { const rd = Math.hypot(p[0] - g.ring.at[0], p[2] - g.ring.at[2]); inp.up = rd - g.ring.r < 3.2 && rd > g.ring.r ? 1 : 0; }
+    if (g.mode === 'slam' && g.wind > .55 && g.fall < 1) { inp.x = g.side; inp.dodge = g.wind > .95 && g.fall < .1; }
+    if (g.mode === 'sweep' && g.wind > .9) inp.up = 1;
+  },
+  // Stand well back from the giant (pass ?boss) and do nothing: it charges. For looking at the charge and its walk back.
+  far(t, player, cam, inp) {
+    once(player, 's', () => { place(player, 2.2, -8.5); player.setForm(0); player.burst = 0; player.yaw = Math.PI; });
+    const g = player.boss; cam.yaw = Math.atan2(g.p[0] - player.p[0], g.p[2] - player.p[2]) + .9; cam.pitch = -.25;
+    inp.x = inp.z = inp.up = 0; inp.act = inp.dodge = inp.guard = false;
   },
   // defence only: stand and answer each raised sword, guarding early, guarding late (a parry), or dodging aside
   ward(t, player, cam, inp) {

@@ -2,7 +2,7 @@
 // depth edges, lets distance wash things towards paper, lays the fog over, and finishes on textured paper.
 import * as THREE from 'three/webgpu';
 import { Fn, vec2, vec3, vec4, float, uniform, texture, texture3D, screenUV, screenCoordinate, screenSize, pass, rtt, Loop, If, Break, mrt, output,
-  getViewPosition, perspectiveDepthToViewZ, interleavedGradientNoise, exp, max, min, length, mix, smoothstep, clamp, abs, floor, fract, dot, sin, cos, step, mod, int } from 'three/tsl';
+  getViewPosition, perspectiveDepthToViewZ, interleavedGradientNoise, exp, max, min, length, mix, smoothstep, clamp, abs, floor, fract, dot, sin, cos, step, mod, int, atan } from 'three/tsl';
 import { PAPER, INK } from './stage.js';
 import { FOG_TOP } from './world.js';
 import { VW, VH } from './veil.js';
@@ -38,7 +38,7 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     projInv: uniform(camera.projectionMatrixInverse), camWorld: uniform(camera.matrixWorld), camPos: uniform(new THREE.Vector3()),
     near: uniform(camera.near), far: uniform(camera.far), dpr: uniform(1),
     boxMin: uniform(new THREE.Vector3()), boxSize: uniform(new THREE.Vector3(1, 1, 1)),
-    flash: uniform(0), smoke: uniform(1), foregroundDensity: uniform(foregroundDensity), heroClear: uniform(0), enemyClear: uniform(0), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
+    flash: uniform(0), mangaC: uniform(new THREE.Vector2(.5, .5)), focus: uniform(0), burst: uniform(0), slash: uniform(0), slashDir: uniform(new THREE.Vector2(1, 0)), invert: uniform(0), smoke: uniform(1), foregroundDensity: uniform(foregroundDensity), heroClear: uniform(0), enemyClear: uniform(0), kFog: uniform(0.13), wisp: uniform(0.85), kInk: uniform(5), haze: uniform(0.0048), hero: uniform(new THREE.Vector3()), heroR: uniform(1.3), hero2: uniform(new THREE.Vector3(0, -99, 0)), time: uniform(0), detail: uniform(1),
     slice: uniform(0.3), sliceV: uniform(0), top: uniform(10), reach: uniform(90), fogTop: uniform(FOG_TOP),
     paper: uniform(new THREE.Color(PAPER)), ink: uniform(new THREE.Color(INK)),
     air: uniform(new THREE.Color(PAPER).lerp(new THREE.Color(INK), .26)), // the air is a grey wash, so white fog is the lightest thing in the picture
@@ -233,6 +233,19 @@ export function createFog(renderer, scene, camera, noise, den, strokes, vel, vei
     col.assign(mix(col, u.ink, strokeT.r.mul(.94).mul(max(keep.mul(1.25).oneMinus(), 0))));
     col.assign(mix(col, u.paper.mul(1.1), clamp(strokeT.g.mul(1.6), 0, 1)));  // the sword's light
     col.assign(mix(col, u.paper.mul(1.12), u.flash));                          // steel on steel: the whole picture blinks
+
+    // Drawn-on lines, as in a comic. Focus: wedges of ink closing in on what is about to strike. Burst: the same wedges thrown
+    // outwards from where it landed, gone in a quarter of a second. Slash: streaks across the picture along the way a blow travels.
+    const aspM = screenSize.x.div(screenSize.y), md = uv.sub(u.mangaC).mul(vec2(aspM, 1)), mr = length(md);
+    const hsh = x => fract(sin(x.mul(127.1)).mul(43758.5453));
+    const cellA = atan(md.y, md.x).div(6.2832).add(.5).mul(84), ci = floor(cellA), cf = fract(cellA).sub(.5).abs(), h1 = hsh(ci), h2 = hsh(ci.add(17.3));
+    const wedge = (inner, dens) => step(h1, dens).mul(step(cf, clamp(mr.sub(inner).sub(h2.mul(.22)).div(.6), 0, 1).mul(h2.mul(.3).add(.05))));
+    const sd = u.slashDir, sq = dot(uv.mul(vec2(aspM, 1)), vec2(sd.y.negate(), sd.x)).mul(46), si = floor(sq), sh = hsh(si);
+    const streak = step(.7, sh).mul(step(fract(sq).sub(.5).abs(), hsh(si.add(3.1)).mul(.14).add(.03)))
+      .mul(step(fract(dot(uv.mul(vec2(aspM, 1)), sd).mul(1.3).add(sh.mul(7)).sub(u.time.mul(7))), .5)).mul(smoothstep(.22, .7, mr));
+    const lines = max(max(wedge(mix(.95, .4, u.focus), mix(.2, .55, u.focus)).mul(u.focus), wedge(mix(1.3, .1, u.burst), float(.62)).mul(smoothstep(0, .25, u.burst))), streak.mul(u.slash));
+    col.assign(mix(col, u.ink, lines.mul(.93)));
+    col.assign(mix(col, u.paper.add(u.ink).sub(col), u.invert));                // one frame of the picture turned inside out on impact
 
     // ink settles into a few tones rather than a smooth grey ramp
     const lum = dot(col, vec3(.3, .59, .11)), ref = dot(u.paper, vec3(.3, .59, .11)), t = clamp(lum.div(ref), 0, 1.05);

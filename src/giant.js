@@ -35,10 +35,11 @@ function limb(r0, r1, bulge, at = .4) {
 const X = new THREE.Vector3(1, 0, 0), v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3(), v4 = new THREE.Vector3(), v5 = new THREE.Vector3(), v6 = new THREE.Vector3();
 const q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), q3 = new THREE.Quaternion(), m4 = new THREE.Matrix4();
 const FLAT = new THREE.Quaternion().setFromAxisAngle(X, -Math.PI / 2), UP = new THREE.Vector3(0, 1, 0);
+const sm = (x, a, b) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
 
 export class GiantRig {
   constructor(scene, noise) {
-    const g = this.group = new THREE.Group(); g.scale.setScalar(GH); scene.add(g);
+    const g = this.group = new THREE.Group(); g.rotation.order = 'YXZ'; g.scale.setScalar(GH); scene.add(g);
     const sk = skin(noise, .64), sk2 = skin(noise, .54), hair = cloth(noise, .05);
     // the drawn outline: every mass has a shell of ink a hand's breadth outside it, seen only from behind, so a heavy
     // brush line follows the whole silhouette and every muscle that stands out from the body. Its width wanders like a brush
@@ -140,7 +141,7 @@ export class GiantRig {
   update(dt, st, cam) {
     const { B, group: g } = this, T = (b, x = 0, y = 0, z = 0) => { b.t[0] = x; b.t[1] = y; b.t[2] = z; };
     const t = st.time, br = Math.sin(t * 1.15), c = st.crouch, lf = st.lift, sq = st.squat, wd = st.wind, dn = st.down, fl = st.flinch, ro = st.roar, s = st.side;
-    const sw = Math.sin(st.walk), cw = Math.cos(st.walk), wa = st.walkAmt, stomp = st.mode === 'stomp', slam = st.mode === 'slam';
+    const sw = Math.sin(st.walk), cw = Math.cos(st.walk), wa = st.walkAmt, stomp = st.mode === 'stomp', slam = st.mode === 'slam', sweep = st.mode === 'sweep', dd = st.death ?? 0;
     for (const b of this.bones) T(b);
     // standing: knees bent and wide apart, arms hanging clear of the body, the head lowered at whoever is down there
     let hipX = .08, hipY = 0, hipZ = .02 * Math.sin(t * .5), chX = .1 + .015 * br, chY = 0, chZ = 0, headX = .25, curl = { L: 1.9, R: 1.9 };
@@ -167,33 +168,51 @@ export class GiantRig {
       mixTo(arm[kO], [.9, -s * .7, -.4, 0], dn);
       curl[kS] = 1.9 - 1.8 * Math.max(wd, dn);
     }
+    // the sweep: down low and turned with the hand as it scythes across; the arm itself is carried by its reach for the hand's point
+    if (sweep) {
+      const kS = s > 0 ? 'L' : 'R', kO = s > 0 ? 'R' : 'L', tw = st.twist ?? 0;
+      hipX += .9 * dn; chX += .42 * dn; hipY += tw * .35; chY += tw * .55; headX -= .7 * dn;
+      for (const k of ['L', 'R']) { const z = k === 'L' ? 1 : -1; mixTo(leg[k], [-1.3, z * .7, 2.0, -z * .25], dn); }
+      mixTo(arm[kO], [.6, -s * .9, -.5, 0], dn); curl[kS] = .15;
+    }
     // the crouch it waits in: the wrestler's start, deep in a squat, bowed over, both fists on the ground
     for (const k of ['L', 'R']) { const z = k === 'L' ? 1 : -1; mixTo(leg[k], [-1.45, z * .8, 2.05, -z * .1], c); mixTo(arm[k], [-.9, z * .2, -.3, 0], c); }
     hipX += .7 * c; chX += .3 * c; headX -= .85 * c;
     // thrown back to bellow; knocked back when the hand is cut
     hipX -= .12 * ro + .1 * fl; chX -= .3 * ro + .28 * fl; headX -= .6 * ro + .35 * fl;
+    // the end: it reels with its head thrown back, sways as its knees go, and then there is nothing holding it up
+    let pitch = 0, flat = 0;
+    if (dd > 0) {
+      const reel = sm(dd, 0, .06) * (1 - sm(dd, .3, .45)), sway = sm(dd, .08, .2) * (1 - sm(dd, .42, .5)), drop = sm(dd, .42, .56);
+      hipX -= .2 * reel; chX -= .4 * reel - .5 * drop; headX += -.9 * reel + .6 * drop; hipZ += .13 * Math.sin(t * 4.2) * sway;
+      for (const k of ['L', 'R']) { const z = k === 'L' ? 1 : -1; arm[k][1] += z * (.9 * reel - .2 * drop); arm[k][2] -= .7 * reel; arm[k][0] -= .5 * drop; mixTo(leg[k], [-.75, z * .55, 1.3, -z * .3], .55 * sway + .3 * drop); curl[k] = 1.9 - 1.4 * sm(dd, .05, .5); }
+      pitch = 1.47 * drop * drop; flat = sm(dd, .62, .96);
+    }
     for (const k of ['L', 'R']) { const z = k === 'L' ? 1 : -1; arm[k][1] += z * (.55 * ro + .3 * fl); arm[k][2] -= 1.1 * ro + .4 * fl; arm[k][0] -= .15 * ro; }
     // (the legs are posed against the ground, not against the pelvis: however far the hips pitch, the thighs stay where they were put)
     for (const k of ['L', 'R']) { T(B['thigh' + k], leg[k][0] - hipX, 0, leg[k][1]); T(B['shin' + k], leg[k][2], 0, leg[k][3]); T(B['arm' + k], arm[k][0], 0, arm[k][1]); T(B['fore' + k], arm[k][2], 0, arm[k][3]); T(B['hand' + k], 0, 0, 0); }
     T(B.hips, hipX, hipY, hipZ); T(B.belly, chX * .4, chY * .4, chZ * .4); T(B.chest, chX * .6, chY * .6, chZ * .6); T(B.head, headX, -chY * .6, -hipZ);
-    const k = 1 - Math.exp(-(st.fast ? 26 : 6.5) * dt);
+    const k = 1 - Math.exp(-(st.fast ? 26 : dd > .4 ? 12 : 6.5) * dt);
     for (const b of this.bones) { b.rotation.x += (b.t[0] - b.rotation.x) * k; b.rotation.y += (b.t[1] - b.rotation.y) * k; b.rotation.z += (b.t[2] - b.rotation.z) * k; }
     for (const kk of ['L', 'R']) { const f = this['fing' + kk]; f.rotation.x += (curl[kk] - f.rotation.x) * Math.min(1, 9 * dt); }
     const bs = 1 + .03 * br; this.gut.scale.set(.235 * bs, .17 * (1 + .02 * br), .22 * (1 + .045 * br));  // it breathes with its belly
-    this.glow.value = st.glow * (.75 + .25 * Math.sin(t * 5)) * (1 + .6 * Math.max(wd, lf));
+    this.glow.value = st.glow * (dd > 0 ? 1 : (.75 + .25 * Math.sin(t * 5)) * (1 + .6 * Math.max(wd, lf)));
 
     // place the body: soles flat whatever the legs do, and the lower foot standing on the ground
-    g.position.set(st.p[0], 0, st.p[2]); g.rotation.y = st.yaw; g.updateMatrixWorld(true);
+    g.position.set(st.p[0], 0, st.p[2]); g.rotation.set(0, st.yaw, 0); g.scale.setScalar(GH); g.updateMatrixWorld(true);
     let lowest = -1e9;
     for (const kk of ['L', 'R']) {
       const z = kk === 'L' ? 1 : -1, ft = B['foot' + kk], up = stomp && (s > 0 ? 'L' : 'R') === kk ? lf : 0;
       B['shin' + kk].getWorldQuaternion(q2); q1.copy(g.quaternion).multiply(q3.setFromAxisAngle(UP, z * .3)); ft.quaternion.copy(q2.invert().multiply(q1)).slerp(q3.identity(), up * .8);
       ft.getWorldPosition(v1); lowest = Math.max(lowest, height(v1.x, v1.z) - (v1.y - SOLE * GH));
     }
+    // falling it goes over about its feet like a tree and lies on its front; then it flattens and spreads, ink soaking into paper
+    if (dd > 0) { this.baseY ??= lowest; lowest = this.baseY + .09 * GH * Math.sin(pitch); g.rotation.x = pitch; const end = 1 - sm(dd, .93, 1); g.scale.set(GH * (1 + .25 * flat) * end, GH * (1 + .1 * flat) * end, GH * (1 - .9 * flat) * end); }
     g.position.y = lowest; g.updateMatrixWorld(true);
+    g.visible = this.cloth.mesh.visible = st.mode !== 'dead';
     // hands: on the ground in the crouch; in the slam, one of them travels from where it was raised to where it lands
     for (const kk of ['L', 'R']) {
-      const z = kk === 'L' ? 1 : -1, mine = slam && (s > 0 ? 'L' : 'R') === kk;
+      const z = kk === 'L' ? 1 : -1, mine = (slam || sweep) && (s > 0 ? 'L' : 'R') === kk;
       if (c > .01) {
         v6.set(z * .19, 0, .31).multiplyScalar(GH).applyQuaternion(g.quaternion).add(v1.set(st.p[0], 0, st.p[2])); v6.y = height(v6.x, v6.z) + .1 * GH;
         this.reach(kk, z, v6, c * c * (3 - 2 * c), false);

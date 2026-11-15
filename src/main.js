@@ -4,7 +4,7 @@ import { createDevice, Gpu } from './gpu.js';
 import { Sim3D } from './sim3d.js';
 import { FOG_TOP, height, terrainTexture, pushOut, DUEL_CLEARING } from './world.js';
 import { buildStage, buildTrail, buildSplash, noiseTexture, external, PAPER } from './stage.js';
-import { buildGroundInk, HIT_FEEDBACK } from './combat-fx.js';
+import { buildGroundInk, buildBlot, HIT_FEEDBACK } from './combat-fx.js';
 import { buildBeasts } from './beasts.js';
 import { createFog } from './fog.js';
 import { Player, Enemy, spar, FORMS, HP, MORPH, SHIFT_MIN, INK_PER_CUT } from './player.js';
@@ -14,6 +14,7 @@ import { GiantRig } from './giant.js';
 import { Veil, VW, VH } from './veil.js';
 import atlasUrl from '../assets/smoke_atlas.jpg';
 import { DEMOS } from './demos.js';
+import { createSound, renderVoice, VOICES } from './sound.js';
 
 const q = new URLSearchParams(location.search);
 const msg = document.getElementById('msg');
@@ -43,7 +44,7 @@ async function boot() {
   const shade = new Figure(scene, noise, { robe: .2, cloak: .02, legs: .06, hat: .1, skin: .3, wraps: .16 });
   const enemy = new Enemy(), fx = [], blasts = [], splash = buildSplash(trail.scene);
   const groundInk = buildGroundInk(scene, noise);
-  const giant = new Giant(), oni = new GiantRig(scene, noise);
+  const giant = new Giant(), oni = new GiantRig(scene, noise), blot = buildBlot(scene, noise);
   if (q.get('hide')?.includes('giant')) { oni.group.visible = false; oni.cloth.mesh.visible = false; }
   // only what reaches into the simulated box is worth sending to it
   const inBox = e => { const b = e.b ?? e.a, m = e.r + 1; return [0, 2].every(i => Math.max(e.a[i], b[i]) > sim.org[i] - m && Math.min(e.a[i], b[i]) < sim.org[i] + n[i] * h + m); };
@@ -108,11 +109,14 @@ async function boot() {
     player.home = [x, z];
     cam.yaw = player.yaw = Math.atan2(cx - x, cz - z);
   }
+  const sound = createSound(q.has('mute')); // made in code; starts with the first key or click, M mutes
   const keys = new Set();
-  let actHeld = false, guardHeld = false, dodgeNow = false, drawer = false, timing = q.has('timing'), ms = null, probeText = '';
+  let anyKey = false, ended = false, actHeld = false, guardHeld = false, dodgeNow = false, drawer = false, timing = q.has('timing'), ms = null, probeText = '';
   addEventListener('keydown', e => {
     if (e.code === 'Tab') { e.preventDefault(); drawer = !drawer; }
     if (e.repeat) return;
+    anyKey = true; if (e.code === 'KeyR' && ended) location.reload();
+    if (e.code === 'KeyM') sound.toggle();
     keys.add(e.code);
     if (e.code === 'ShiftLeft') dodgeNow = true;
     const f = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
@@ -155,6 +159,25 @@ async function boot() {
     + `<g mask="url(#im)" stroke="#ece6d8" fill="none">${[[-3.4, 1.6, '.09 .04 .16 .03'], [.4, 1.1, '.05 .07 .2 .05'], [3.3, 1.8, '.13 .03 .07 .06']].map(([y, w, d]) => `<path d="${STROKE}" pathLength="1" transform="translate(0 ${y})" stroke-width="${w}" stroke-dasharray="${d}"/>`).join('')}</g></g></svg>`;
   const gGlyph = gauge.firstChild, gInk = gauge.querySelectorAll('g > path')[1], gMask = gauge.querySelector('mask path'), gDry = gauge.querySelector('g[mask]'), gRough = gauge.querySelector('feDisplacementMap');
   document.body.append(hud, seal, gauge);
+  // staged moments: black bars, the giant's name, the end card; and brush characters stamped on the picture at heavy blows
+  const SERIF = "'Songti TC','Noto Serif TC','Songti SC',serif"; // single quotes: it also goes inside style="" attributes
+  const mk = (css, html = '') => { const el = document.createElement('div'); el.style.cssText = css; el.innerHTML = html; document.body.append(el); return el; };
+  const bars = [0, 1].map(i => mk(`position:fixed;left:-2%;right:-2%;${i ? 'bottom' : 'top'}:-1vh;height:0;background:#121419;pointer-events:none;filter:url(#ib)`));
+  const title = mk(`position:fixed;right:11%;top:14%;writing-mode:vertical-rl;font:900 11vh/1.05 ${SERIF};color:#121419;filter:url(#ib);pointer-events:none;opacity:0`,
+    `巨相撲鬼<span style="writing-mode:horizontal-tb;display:inline-block;margin-top:1.4vh;padding:.5vh .9vh;background:#b3301f;color:#f1e9da;font:700 2.6vh/1.1 ui-serif,Georgia,serif;border-radius:.4vh">Boss</span>`);
+  const endCard = mk('position:fixed;inset:0;display:grid;place-items:center;background:rgba(236,230,216,0);pointer-events:none;opacity:0',
+    `<div style="text-align:center;font:600 3vh/1.9 ${SERIF};color:#121419"><div style="display:inline-block;padding:1.2vh 1.4vh;background:#b3301f;color:#f1e9da;font:700 9vh/1.1 ${SERIF};writing-mode:vertical-rl;border-radius:.6vh">化墨</div><br>巨相撲鬼 伏誅<br><span style="opacity:.6;font-size:2vh">按 R 再來一次</span></div>`);
+  const stamps = [];
+  const stamp = (text, at, size = 1, red = false) => {
+    const el = mk(`position:fixed;left:0;top:0;pointer-events:none;white-space:nowrap;font:900 ${Math.round(innerHeight * .17 * size)}px/1 ${SERIF};color:${red ? '#b3301f' : '#121419'};filter:url(#ib);will-change:transform,opacity`);
+    el.textContent = text; stamps.push({ el, at: [...at], t: 0, rot: ((stamps.length * 37 + frame) % 9 - 4) * .06 });
+  };
+  const heard = { snap: false, esnap: false, beat: 0, act: -1 };
+  let cine = null, burstK = 0, burstAt = null, slashK = 0, invertN = 0, geyser = 0, tcam = 0, endT = -1, fovNow = 50;
+  const lastHand = new THREE.Vector2(), nowHand = new THREE.Vector2(), sm = (x, a, b) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+  // these are moved a step every frame rather than left to CSS timing, so a capture stepped by hand shows them exactly as play does
+  let barsOn = false, barK = 0, titleOn = false, titleK = 0, titleT = 0;
+  const show = on => { barsOn = on; if (!on) titleOn = false; };
   let fps = 60, last = performance.now(), frame = 0, shake = 0;
 
   const demo = DEMOS[q.get('demo')] ?? null, override = { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false };
@@ -170,17 +193,34 @@ async function boot() {
     const t = clock;
     if (demo) demo(t, player, cam, override);
     const beforeX = player.p[0], beforeZ = player.p[2];
-    player.update(dt, demo ? override : input(), cam, enemy.alive ? enemy.p : giant.aim(player.p));
+    // a staged moment (the giant's entrance, the kill) runs on real time; the entrance can be skipped with any key
+    if (cine) { cine.t += DT; if (cine.t >= cine.dur || (anyKey && cine.kind === 'entrance' && cine.t > .5)) { cine = null; show(false); } }
+    anyKey = false; player.staged = cine?.kind === 'entrance';
+    const held = player.staged ? { x: 0, z: 0, up: 0, down: 0, act: false, guard: false, dodge: false } : demo ? override : input();
+    player.update(dt, held, cam, enemy.alive ? enemy.p : giant.aim(player.p));
+    // the giant's bulk: a body in the air cannot pass through it
+    if (!player.ride && player.plunge !== 1) for (const [x, y, z, r] of giant.volumes()) {
+      const dx = player.p[0] - x, dy = player.p[1] + .8 - y, dz = player.p[2] - z, d = Math.hypot(dx, dy, dz);
+      if (d < r && d > .01) { const k = (r - d) / d; player.p[0] += dx * k; player.p[2] += dz * k; player.p[1] = Math.max(height(player.p[0], player.p[2]), player.p[1] + dy * k); }
+    }
     pushOut(player.p, .32, giant.solids()); // its feet, and a hand lying on the ground, are in the way
     // what the body did this step that the air should feel: leaving the ground, coming down, the stab from the air, landing on its back
     for (const ev of player.events.splice(0)) {
       const k = Math.min(1, (ev.v ?? 0) / 14);
+      sound.play({ jump: 'jump', land: 'land', down: 'land', dodge: 'roll', shift: 'shift', breach: 'splash', mount: 'step', plunge: 'land', headstab: 'stab' }[ev.kind], { v: ev.kind === 'land' ? k : 1, back: ev.to === 0 });
       if (ev.kind === 'jump') fx.push({ a: ev.at, r: 1.3, ink: 0, div: 9, life: .16, t: 0 });
       else if (ev.kind === 'land') { fx.push({ a: ev.at, r: 1.2 + 1.2 * k, ink: 0, div: 8 + 16 * k, life: .2, t: 0 }); shake = Math.max(shake, .3 * k); }
       else if (ev.kind === 'down') { fx.push({ a: ev.at, r: 1.8, ink: 0, div: 14, life: .2, t: 0 }); shake = Math.max(shake, .5); }
       else if (ev.kind === 'shift') { // the change of form: a breath of ink where the body was, and the smoke stirred
         fx.push({ a: [ev.at[0], ev.at[1] + (ev.to === 3 || ev.from === 3 ? .4 : 1), ev.at[2]], r: 1.4, ink: .3, div: 8, life: .22, t: 0 });
         blasts.push({ p: [ev.at[0], ev.at[1] + 1, ev.at[2]], r: 3.2, split: 130, den: -9, life: .35, t: 0 }); flash = Math.max(flash, .08); shake = Math.max(shake, .3);
+      }
+      else if (ev.kind === 'mount') shake = Math.max(shake, .4);
+      else if (ev.kind === 'breach') { fx.push({ a: ev.at, r: 1.6, ink: 0, div: 16, life: .2, t: 0 }); blasts.push({ p: ev.at, r: 3, split: 160, den: -8, life: .35, t: 0 }); }
+      else if (ev.kind === 'headstab') { // the sword goes into the giant's head: everything stops for it
+        cine = { kind: 'kill', t: 0, dur: 3.6, a0: Math.atan2(eye.x - ev.at[0], eye.z - ev.at[2]) }; show(true);
+        slowT = 1.5; hold = 14; flash = 1; kick = 1; shake = 2.4; invertN = 3; burstK = 1; burstAt = ev.at; geyser = 1.1; stamp('斬', ev.at, 1.5, true);
+        fx.push({ a: ev.at, r: 3, ink: 2, div: 40, life: .4, t: 0 }); blasts.push({ p: ev.at, r: 9, split: 320, den: -40, life: .8, t: 0 });
       }
       else if (ev.kind === 'plunge') {
         fx.push({ a: ev.at, r: 2.6, ink: 0, div: 34, life: .25, t: 0 }); blasts.push({ p: [ev.at[0], ev.at[1] + .6, ev.at[2]], r: 5, split: 220, den: -22, life: .5, t: 0 });
@@ -202,17 +242,24 @@ async function boot() {
     // the giant: every stamp and blow shakes the picture, throws ink up and blows the fog and the smoke open
     const gev = giant.update(dt, player, enemy.mode === 'done'), cut = giant.struck(player); if (cut) gev.push(cut);
     for (const ev of gev) {
-      const [sh, fl, kk, hd, r, div, n, size] = { wake: [.9, 0, 0, 0, 3, 16, 0, 1], roar: [1.7, .2, .5, 0, 4.5, 34, 0, 1], step: [.8, 0, .2, 0, 2.6, 16, 20, 1], stomp: [2.8, .3, .9, 8, 5, 55, 90, 1.15], slam: [3.2, .55, 1, 11, 4.5, 60, 100, 1.15], struck: [1.3, .3, .5, 6, 2, 18, 50, 1], cut: [.9, .22, .4, 5, 2, 16, ev.big ? 70 : 34, 1.4] }[ev.kind];
+      const [sh, fl, kk, hd, r, div, n, size] = { sweep: [1.2, .1, .4, 0, 3, 20, 0, 1], charge: [1.6, .12, .5, 0, 4, 26, 0, 1], gate: [.6, .1, .3, 0, 3, 30, 0, 1], topple: [3.6, .5, 1, 10, 6, 70, 150, 1.3], dead: [0, 0, 0, 0, 1, 0, 0, 1], wake: [.9, 0, 0, 0, 3, 16, 0, 1], roar: [1.7, .2, .5, 0, 4.5, 34, 0, 1], step: [.8, 0, .2, 0, 2.6, 16, 20, 1], stomp: [2.8, .3, .9, 8, 5, 55, 90, 1.15], slam: [3.2, .55, 1, 11, 4.5, 60, 100, 1.15], struck: [1.3, .3, .5, 6, 2, 18, 50, 1], cut: [.9, .22, .4, 5, 2, 16, ev.big ? 70 : 34, 1.4] }[ev.kind];
       shake = Math.max(shake, sh); flash = Math.max(flash, fl); kick = Math.max(kick, kk); hold = Math.max(hold, hd);
+      sound.play({ wake: 'rumble', roar: 'groar', step: 'gstep', stomp: 'stomp', slam: 'slam', sweep: 'sweep', charge: 'sweep', struck: 'hurt', cut: 'cut', topple: 'slam', dead: 'end', gate: 'splash' }[ev.kind]);
       fx.push({ a: ev.at, r, ink: 0, div, life: .3, t: 0 });
       if (n) splash.burst(ev.at, ev.dir ?? [0, 0], n, size);
       if (sh > 1.5) blasts.push({ p: [ev.at[0], ev.at[1] + (ev.kind === 'roar' ? 0 : 1.2), ev.at[2]], r: ev.kind === 'roar' ? 8 : 11, split: 300, den: ev.kind === 'roar' ? -12 : -40, life: .7, t: 0 });
-      if (ev.kind === 'wake') player.home = [-1, -6];
+      if (ev.kind === 'wake') { player.home = [-1, -6]; if (!q.has('nocine') && !cam.fixed) { cine = { kind: 'entrance', t: 0, dur: 5.6, eye0: eye.clone(), tgt0: tgt.clone(), named: false }; show(true); } }
+      // heavy blows are drawn as well as felt: lines thrown out from where they land, a frame turned inside out, a character stamped on the picture
+      if (ev.kind === 'stomp' || ev.kind === 'slam' || ev.kind === 'topple') { burstK = 1; burstAt = ev.at; invertN = 2; stamp(ev.kind === 'slam' ? '砰' : '轟', [ev.at[0], ev.at[1] + 1.2, ev.at[2]], ev.kind === 'topple' ? 1.3 : 1); }
+      if (ev.kind === 'sweep' || ev.kind === 'charge') { burstK = .7; burstAt = ev.at; }
+      if (ev.kind === 'roar') stamp('吼', ev.at, 1.1);
+      if (ev.kind === 'dead') endT = 0;
       if (ev.kind === 'struck') taken++; else if (ev.kind === 'cut') { dealt++; player.ink = Math.min(1, player.ink + INK_PER_CUT); }
     }
     for (const ev of spar(player, enemy)) {
       if (ev.kind === 'dodge') { warded++; continue; }
       const profile = HIT_FEEDBACK[ev.kind], force = Math.sqrt(ev.impact ?? 1);
+      sound.play({ cut: 'cut', kill: 'kill', taken: 'hurt', down: 'hurt', block: 'block', parry: 'steel', clash: 'steel', push: 'cut' }[ev.kind], { k: force });
       const received = ev.kind === 'taken' || ev.kind === 'down';
       const toward = received ? -1 : 1;
       const x = (enemy.p[0] - player.p[0]) * toward, z = (enemy.p[2] - player.p[2]) * toward;
@@ -224,6 +271,7 @@ async function boot() {
       if (profile.air) fx.push({ a: ev.at, r: profile.radius * force, ink: 0, div: profile.air * force, life: .2, t: 0 });
       player.shake = Math.max(player.shake, profile.shake * force);
       if (ev.kind === 'kill') player.home = [enemy.p[0], enemy.p[2]]; // fall after this and you come back here
+      if (ev.kind === 'parry') stamp('鏘', ev.at, .6); else if (ev.kind === 'kill') stamp('斬', ev.at, .7);
       if (received) {
         taken++;
         heroClearUntil = Math.max(heroClearUntil, t + .32);
@@ -259,6 +307,14 @@ async function boot() {
     groundInk.update(dt);
     const eb = enemy.blade();
     trail2.update(dt, eb, enemy.actT, shade.tip);
+    // what can be heard of all this: the blade as it snaps through, feet as they land, wings, the tiger's voice, and the air
+    if (bl?.snap && !heard.snap) sound.play('swish', { heavy: player.combo === 2 ? 1 : 0 }); heard.snap = !!bl?.snap;
+    if (eb?.snap && !heard.esnap) sound.play('swish', { heavy: .3 }); heard.esnap = !!eb?.snap;
+    for (const ft of hero.feet) if (ft.landed) { ft.landed = false; if (f === 0 && player.ground && !player.ride) sound.play('step', { v: .5 + .5 * run }); }
+    const beat = Math.floor(player.phase * (f === 1 ? 2.2 / Math.PI : 1.25 / 6.2832));
+    if (beat !== heard.beat && f === 1 && (player.ground || player.ride) && run > .2) sound.play('step', { v: 1 }); if (beat !== heard.beat && f === 2) sound.play('flap'); heard.beat = beat;
+    if (f === 1 && act >= 0 && !(heard.act >= 0)) sound.play('roar'); heard.act = act;
+    sound.frame(DT, run, giant.awake && giant.alive);
 
     // ---- camera: follows with a little lag, and shakes when something big happens
     shake = Math.max(player.shake, shake * Math.exp(-9 * DT)); player.shake = 0;
@@ -267,15 +323,33 @@ async function boot() {
     if (!camReady) tgt.copy(want); else tgt.lerp(want, 1 - Math.exp(-14 * dt));
     if (cam.fixed) { eye.set(...cam.fixed.pos); tgt.set(...cam.fixed.look); }
     else {
-      const pitch = Math.min(.9, cam.pitch + .36 * gcam), cp = Math.cos(pitch), dist = cam.dist * [1, 1.2, 1.5, 1.15][f] * (1 + .7 * gcam);
+      // while the giant raises a leg or an arm the camera sinks and looks up a little more; riding it, it closes in
+      tcam += ((giant.alive && giant.awake ? Math.max(giant.lift, giant.wind) : 0) - tcam) * (1 - Math.exp(-5 * dt));
+      const pitch = Math.min(.9, cam.pitch + .36 * gcam + .1 * tcam), cp = Math.cos(pitch), dist = cam.dist * [1, 1.2, 1.5, 1.15][f] * (1 + .7 * gcam + .1 * tcam) * (player.ride ? .75 : 1);
       want.set(tgt.x - Math.sin(cam.yaw) * cp * dist, tgt.y - Math.sin(pitch) * dist, tgt.z - Math.cos(cam.yaw) * cp * dist);
       const cq = [want.x, 0, want.z]; pushOut(cq, .45); want.x = cq[0]; want.z = cq[2]; // the camera does not sit inside a trunk
       want.y = Math.max(want.y, height(want.x, want.z) + .6);
       if (!camReady) eye.copy(want); else eye.lerp(want, 1 - Math.exp(-9 * dt));
     }
     camReady = true;
+    let roll = 0, fov = 50;
+    if (cine && !cam.fixed) {
+      const u = cine.t, G = giant.p, P = giant.parts;
+      if (cine.kind === 'entrance') { // low on the ground before it as it rises, sliding aside; then back behind the swordsman's shoulder
+        const dx = player.p[0] - G[0], dz = player.p[2] - G[2], dl = Math.hypot(dx, dz) || 1, ux = dx / dl, uz = dz / dl, a = sm(u, 0, 1.5), b = sm(u, 1.4, 4.0), c = sm(u, 4.5, cine.dur), hd = P?.head ?? [G[0], G[1] + 4, G[2]];
+        want.copy(eye); eye.copy(cine.eye0).lerp(tv.set(G[0] + ux * 7.6 - uz * 1.6 * b, G[1] + .7 + .5 * b, G[2] + uz * 7.6 + ux * 1.6 * b), a).lerp(want, c);
+        want.copy(tgt); tgt.copy(cine.tgt0).lerp(tv.set(hd[0], hd[1] - 1.5 * (1 - b), hd[2]), a).lerp(want, c);
+        fov = 50 + 12 * a * (1 - c); roll = .07 * b * (1 - c);
+        if (u > 3.0 && !cine.named) { cine.named = true; titleOn = true; titleT = 0; flash = Math.max(flash, .6); }
+        if (u > 4.6) show(false);
+      } else if (P) { // the kill: round the head, close
+        const c = P.crown, ang = cine.a0 + 1.9 * sm(u, 0, cine.dur), R = 6.5 - 1.5 * sm(u, 0, 1.2);
+        eye.set(c[0] + Math.sin(ang) * R, c[1] + 1.4 + .25 * u, c[2] + Math.cos(ang) * R); tgt.set(c[0], c[1] - .3, c[2]); fov = 46;
+      }
+    }
     camera.position.copy(eye);
-    camera.lookAt(tgt);
+    camera.lookAt(tgt); if (roll) camera.rotateZ(roll);
+    if (Math.abs(fov - fovNow) > .01) { fovNow += (fov - fovNow) * Math.min(1, 12 * DT); camera.fov = fovNow; camera.updateProjectionMatrix(); }
     camera.updateMatrixWorld();
     // ---- smoke layers: what moved this frame pushes each layer, more the closer its depth is to that layer's
     const cuts = [bladeStrip(bl, bladePhase), bladeStrip(eb, enemy.actT)].filter(Boolean);
@@ -350,6 +424,40 @@ async function boot() {
     if (gp) { press[0].value.set(...gp.footL, 2.6); press[1].value.set(...gp.footR, 2.6); press[2].value.set(hand ? hand[0] : 0, hand ? hand[1] - .4 : -99, hand ? hand[2] : 0, 2.8); }
     const rg = giant.ring; stage.reeds.ring.value.set(rg ? rg.at[0] : 0, rg ? rg.at[2] : 0, rg ? rg.r : 0, rg ? 1.5 * Math.max(0, 1 - rg.r / 15) : 0);
     fog.u.time.value = t;
+    { // the drawn lines: closing in on a raised limb, thrown out from a blow, streaked along a falling hand
+      const P = giant.parts, U = fog.u, side = giant.side > 0 ? 'L' : 'R', onScreen = (q, out) => { tv.set(q[0], q[1], q[2]).project(camera); out.set(tv.x * .5 + .5, .5 - tv.y * .5); };
+      let focus = 0, slashing = false;
+      if (P && giant.alive && giant.awake && !cine) {
+        if (giant.mode === 'stomp' && giant.lift > .05) { focus = giant.lift; onScreen(P['foot' + side], U.mangaC.value); }
+        else if ((giant.mode === 'slam' || giant.mode === 'sweep' || giant.mode === 'charge') && giant.wind > .05) { focus = giant.wind; onScreen(giant.mode === 'charge' ? P.chest : P['hand' + side], U.mangaC.value); }
+        slashing = giant.fast && (giant.mode === 'slam' ? giant.fall < 1 : giant.mode === 'sweep' || giant.mode === 'charge');
+        onScreen(giant.mode === 'charge' ? P.chest : P['hand' + side], nowHand);
+        if (slashing) { const dx = (nowHand.x - lastHand.x) * camera.aspect, dy = nowHand.y - lastHand.y, l = Math.hypot(dx, dy); if (l > 1e-4) U.slashDir.value.set(dx / l, dy / l); }
+        lastHand.copy(nowHand);
+      }
+      U.focus.value += (focus * .8 - U.focus.value) * Math.min(1, 10 * DT);
+      burstK *= Math.exp(-10 * DT); U.burst.value = burstK; if (burstK > .03 && burstAt) onScreen(burstAt, U.mangaC.value);
+      slashK += ((slashing ? 1 : 0) - slashK) * Math.min(1, (slashing ? 30 : 9) * DT); U.slash.value = slashK;
+      U.invert.value = invertN-- > 0 ? 1 : 0;
+      // brush characters: slammed on big, settling, then gone
+      for (let i = stamps.length - 1; i >= 0; i--) {
+        const k = stamps[i]; k.t += DT; tv.set(...k.at).project(camera);
+        const x = Math.min(.88, Math.max(.12, tv.x * .5 + .5)) * innerWidth, y = Math.min(.82, Math.max(.16, .5 - tv.y * .5)) * innerHeight, sc = 1 + 1.1 * Math.exp(-k.t * 16);
+        k.el.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%) rotate(${k.rot}rad) scale(${sc})`; k.el.style.opacity = tv.z < 1 ? 1 - sm(k.t, .5, .85) : 0;
+        if (k.t > .85) { k.el.remove(); stamps.splice(i, 1); }
+      }
+      barK += ((barsOn ? 1 : 0) - barK) * Math.min(1, 7 * DT); bars.forEach(b => { b.style.height = `${11 * barK}vh`; });
+      titleK += ((titleOn ? 1 : 0) - titleK) * Math.min(1, (titleOn ? 16 : 7) * DT); titleT += DT; title.style.opacity = titleK; title.style.transform = `scale(${1 + .7 * Math.exp(-titleT * 14)})`;
+      // where the hand will come down
+      blot.set(giant.target, 2.7, giant.mode === 'slam' && giant.fall < 1 ? giant.wind : 0);
+      // ink out of the wound
+      if (geyser > 0 && P) { geyser -= DT; if (frame % 3 === 0) splash.burst(P.crown, [0, 0], 12, 1.3); }
+      // the giant is gone: the fog lifts, and the slice closes on its seal
+      if (endT >= 0) {
+        endT += DT; const k = sm(endT, 0, 5); fog.u.kFog.value = .13 - .08 * k; veils.forEach(v => { v.amount0 ??= v.amount; v.amount = v.amount0 * (1 - .65 * k); });
+        const e = sm(endT, 2.2, 4.6); ended = endT > 2.2; endCard.style.opacity = e; endCard.style.background = `rgba(236,230,216,${.82 * e})`;
+      }
+    }
     fog.u.hero.value.set(player.p[0], player.p[1] + (f < 2 ? .95 : 0), player.p[2]); fog.u.heroR.value = [1.4, 1.6, 2.4, 1.6][f];
     fog.u.hero2.value.set(enemy.p[0], !enemy.present ? -99 : enemy.p[1] + .95, enemy.p[2]);
     const heroClear = fog.u.heroClear;
@@ -379,7 +487,7 @@ async function boot() {
       const move = f === 0 && act >= 0 ? `  ${['橫斬', '挑斬', '下劈'][player.combo ?? 0]}` : '';
       let s = `${FORMS[f]}${move}  我 ${pips(player.hp, HP)}  敵 ${pips(enemy.alive ? Math.ceil(enemy.hp) : 0, enemy.maxHp ?? 6)} ${Math.min(enemy.n + 1, enemy.total)}/${enemy.total}${giant.awake ? '  巨相撲鬼' : ''}  中 ${dealt} 擋 ${warded} 受 ${taken} · ${fps.toFixed(0)} fps${ms ? ` · sim ${tot.toFixed(2)} ms` : ''}`;
       if (drawer) {
-        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（不按方向＝後跳，按方向＝翻滾；鶴鯉為下降）\n空中按出招＝下突刺 · 閃避尾段按出招＝衝斬 · 被擊飛時按空白＝受身\n化獸（共用下方的墨）：跳躍中再按空白＝鶴 · 閃避中再按 Shift＝虎 · 連按兩下格擋＝鯉 · 化獸時按出招＝變回並出招，格擋鍵＝獸的本招\n巨相撲鬼：四股的震波要跳過或閃過 · 巨掌落下前走開 · 手掌貼地時可以斬\nV 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
+        s += `\n\nWASD 移動 · 滑鼠 視角（點一下畫面鎖定）· 空白 跳／升\n左鍵／F 出招（連按接三刀）· 右鍵／Q 格擋（抓準時機＝彈開）· Shift 閃避（不按方向＝後跳，按方向＝翻滾；鶴鯉為下降）\n空中按出招＝下突刺 · 閃避尾段按出招＝衝斬 · 被擊飛時按空白＝受身\n化獸（共用下方的墨）：跳躍中再按空白＝鶴 · 閃避中再按 Shift＝虎 · 連按兩下格擋＝鯉 · 化獸時按出招＝變回並出招，格擋鍵＝獸的本招\n巨相撲鬼：四股的震波要跳過或閃過 · 巨掌落下前走開 · 手掌貼地時可以斬\nM 靜音 · V 俯視切面 · T 量時 · P 驗算 · R 重置 · Tab 收起\n\n模擬盒 ${sim.n.join('×')} 格 · 每格 ${h} 米`;
         if (ms) s += '\n\n' + Object.entries(ms).map(([k, v]) => `${k.padEnd(18)}${v.toFixed(2)} ms`).join('\n');
         if (probeText) s += '\n\n' + probeText;
       }
@@ -396,11 +504,12 @@ async function boot() {
   // hooks for scripted captures: advance exactly n frames, then wait for the GPU
   window.__advance = async k => { for (let i = 0; i < k; i++) tick(); await device.queue.onSubmittedWorkDone(); return frame; };
   window.__probe = () => sim.probe();
+  window.__sound = name => renderVoice(name); window.__voices = Object.keys(VOICES);
   // wall time per frame with the GPU drained each frame: sim + render, no vsync
   window.__bench = async k => { const t0 = performance.now(); for (let i = 0; i < k; i++) { tick(); await device.queue.onSubmittedWorkDone(); } return (performance.now() - t0) / k; };
   window.__state = () => ({ frame, ms, clock, hold, p: player.p, form: player.form, hp: player.hp, combo: player.combo,
     attack: player.actT, dealt, taken, warded, foe: enemy.mode, enemyHp: enemy.hp, enemyIndex: enemy.n, fall: enemy.fallT, melt: enemy.meltT,
-    step: player.demoStep, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
+    sound: sound.on, step: player.demoStep, pinned: !!giant.pinned, ride: player.ride?.kind ?? null, bossDeath: giant.death, cine: cine?.kind ?? null, ended, ink: player.ink, morph: player.morphT, v: [...player.v], vy: player.v[1], ground: player.ground, dodge: player.dodge, invuln: player.invuln, ko: player.ko, plunge: player.plunge, fallen: player.fallen,
     hero: { ik: hero.ikW, feet: hero.feet.map(f => { const b = hero.B['foot' + f.k].getWorldPosition(tv); return { planted: f.t >= 1, x: b.x, y: b.y, z: b.z }; }) },
     boss: giant.mode, parts: giant.parts, target: giant.target, planted: giant.planted && giant.fall >= 1 && giant.ik >= 1, side: giant.side,
     foot: giant.parts ? ['footL', 'footR'].map(k => giant.parts[k][1] - height(giant.parts[k][0], giant.parts[k][2])) : null });

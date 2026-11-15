@@ -22,11 +22,12 @@ Open `dist/smoke-procedural.html` (or `dist/index.html` for the photographed smo
 | `T` | GPU time per simulation stage |
 | `P` | validation numbers (slow) |
 | `R` | reset the fog |
+| `M` | mute (sound starts with the first key or click) |
 | `Tab` | help and details |
 
-URL options: `?f32=1` (32-bit float fields), `?n=96,40,96&h=0.25` (box cells and cell size), `?cycles=2` (pressure accuracy), `?dpr=2` (pixel ratio cap, default 1.5), `?demo=moves|shift|journey|combo|fogwalk|reeds|smokecut|spar|ward|boss|stand|oni|spin|tour|slash|roar|flap|carp`, `?steps=56` (march steps through the 3D fog, default 28), `?arena` (start at the first clearing with normal controls), `?boss` (skip the four shadows and start near the giant).
+URL options: `?f32=1` (32-bit float fields), `?n=96,40,96&h=0.25` (box cells and cell size), `?cycles=2` (pressure accuracy), `?dpr=2` (pixel ratio cap, default 1.5), `?demo=climb|pillar|gate|moves|shift|beasts|journey|far|combo|fogwalk|reeds|smokecut|spar|ward|boss|stand|oni|spin|tour|slash|roar|flap|carp`, `?steps=56` (march steps through the 3D fog, default 28), `?arena` (start at the first clearing with normal controls), `?boss` (skip the four shadows and start near the giant).
 
-The path opens into a clearing for the first duel before heading north through the reeds. Defeat four ink shadows one after another, and the giant (巨相撲鬼) rises at the path's end. Jump or dodge through its shock wave, and cut its hand while it lies on the ground. It cannot be defeated yet.
+The path opens into a clearing for the first duel before heading north through the reeds. Defeat four ink shadows one after another, and the giant (巨相撲鬼) rises at the path's end. Jump or dodge through its shock wave and over its sweeping hand, get out from under the open hand (a ring of ink on the ground shows where), and cut the hand while it lies there: the arm stays down. Roll at it and roll again into the tiger, which runs up the arm; on the shoulder jump, and jump again into the crane; over its head, attack: the swordsman drops on the point of the sword and the giant dies. Two other ways up: as the tiger up the rock at the clearing's edge, or as the carp under the fog beside its foot when it stamps.
 
 ## Build
 
@@ -58,6 +59,8 @@ tools/ta.sh "?f32=0" "?f32=1"   # solver numbers (build dist/t-a.html first: see
 node tools/bench.mjs [page]      # whole-frame cost at 720p and 1080p
 node tools/check-spar.mjs spar   # the four shadows; `ward` = defence only; `journey 110` = shadows, then the giant
 node tools/check-moves.mjs       # the swordsman's motion: foot slide, dodge distances, jump heights, recovery times
+node tools/check-sound.mjs       # renders every voice offline: peak, loudness, length; then plays a whole kill with audio running
+node tools/check-climb.mjs climb # the kill by the arm; `pillar` = by the rock, `gate` = thrown up as the carp
 node tools/check-shift.mjs       # changing form: how long a gauge lasts, how fast it refills, speed across the change
 tools/strip.sh moves roll 16.9 17.8 4   # a close-up strip of one stretch of a demo (start s, end s, frames between shots)
 node tools/check-boss.mjs 60     # the giant: mode sequence, where its hand lands, feet on the ground; `60 stand` = a player who does not defend
@@ -81,7 +84,8 @@ node tools/capture.mjs "?demo=tour" out/tour --frames=12 --every=110   # contact
 | `src/beasts.js`, `src/strips.js` | tiger, crane and carp; verlet strips for cloth, feathers and fins |
 | `src/veil.wgsl`, `src/veil.js` | the ten 2D smoke layers and how blades, bodies and blasts move them |
 | `src/smoke-procedural.wgsl`, `src/smoke-procedural.js` | the smoke atlas generated on the GPU for the procedural build |
-| `src/combat-fx.js` | hit feedback table and the ink left on the ground |
+| `src/combat-fx.js` | hit feedback table, the ink left on the ground, the ring where the giant's hand will land |
+| `src/sound.js` | every sound, made in code |
 | `src/main.js` | boot, input, frame loop, HUD |
 | `src/demos.js` | scripted runs for repeatable captures |
 | `src/tests/` | numeric tests that run the solvers without a renderer |
