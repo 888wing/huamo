@@ -207,6 +207,12 @@ whole frame reached 16.9 ms at 1080p. Fixed by (1) letting the pull saturate smo
 (2) compositing the smoke layers in their own half-resolution pass (`smoke` / `smokeRT` in `fog.js`), returning
 weighted colour and transmittance. Now 8.6 ms at 720p and 11.6 ms at 1080p on the M4.
 
+Round 15 (2026-11-15): the owner found it ugly to keep seeing whole smoke pictures and asked for every picture to be
+at least twice as large. Lookup scales in `fog.js` were more than halved (sheet 0.9 -> 0.4, puffs 1.5 -> 0.46 with
+smaller in-cell scale, wisps 2.2 -> 0.7, detail 2.6 -> 1.15). Two seams appeared once enlarged and were fixed: the
+sheet and detail cells now repeat mirrored (`cellM`), and a rotated puff is kept wholly inside its lattice cell
+(in-cell scale 0.56-0.78, offset limited to 0.5 - 0.62 x scale) so the cell boundary can no longer cut it.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).
