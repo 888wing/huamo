@@ -8,7 +8,7 @@
  "loudness": -16,
  "card": {
   "dur": 2.6,
-  "html": "<body style='margin:0;background:PAPER;display:grid;place-items:center;height:100vh;font-family:\"Songti TC\",\"Noto Serif TC\",serif;color:#121419'><div style='text-align:center'><div style='display:inline-block;padding:2.4vh 2.6vh;background:#b3301f;color:#f1e9da;font:700 19vh/1.08 \"Songti TC\",serif;writing-mode:vertical-rl;border-radius:1vh'>化墨</div><div style='margin-top:4.5vh;font:600 6.4vh/1 Georgia,serif;letter-spacing:1.1em;text-indent:1.1em'>HUAMO</div><div style='margin-top:3.6vh;font:400 3.5vh/1 Georgia,serif;letter-spacing:.1em;opacity:.66'>fog as ink &nbsp;·&nbsp; one 300 KB HTML file &nbsp;·&nbsp; three.js WebGPU</div></div></body>"
+  "html": "<body style='margin:0;background:PAPER;display:grid;place-items:center;height:100vh;font-family:\"Songti TC\",\"Noto Serif TC\",serif;color:#121419'><div style='text-align:center'><div style='display:inline-block;padding:2.4vh 2.6vh;background:#b3301f;color:#f1e9da;font:700 19vh/1.08 \"Songti TC\",serif;writing-mode:vertical-rl;border-radius:1vh'>化墨</div><div style='margin-top:4.5vh;font:600 6.4vh/1 Georgia,serif;letter-spacing:1.1em;text-indent:1.1em'>HUAMO</div><div style='margin-top:3.6vh;font:400 3.5vh/1 Georgia,serif;letter-spacing:.1em;opacity:.66'>fog as ink &nbsp;·&nbsp; one HTML file, 300 KB gzipped &nbsp;·&nbsp; three.js WebGPU</div></div></body>"
  },
  "shots": [
   {
