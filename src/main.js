@@ -14,7 +14,7 @@ import { GiantRig } from './giant.js';
 import { Veil, VW, VH } from './veil.js';
 import atlasUrl from '../assets/smoke_atlas.jpg';
 import { DEMOS } from './demos.js';
-import { createSound, renderVoice, VOICES } from './sound.js';
+import { createSound, renderVoice, renderLog, VOICES } from './sound.js';
 
 const q = new URLSearchParams(location.search);
 const msg = document.getElementById('msg');
@@ -116,7 +116,8 @@ async function boot() {
     player.home = [x, z];
     cam.yaw = player.yaw = Math.atan2(cx - x, cz - z);
   }
-  const sound = createSound(q.has('mute')); // made in code; starts with the first key or click, M mutes
+  const soundLog = q.has('manual') ? [] : null; // a run stepped by hand keeps a log of its sound, to be rendered afterwards
+  const sound = createSound(q.has('mute'), soundLog); // made in code; starts with the first key or click, M mutes
   const keys = new Set();
   let skipKey = false, ended = false, actHeld = false, guardHeld = false, dodgeNow = false, drawer = false, timing = q.has('timing'), ms = null, probeText = '';
   addEventListener('keydown', e => {
@@ -567,7 +568,7 @@ async function boot() {
       hud.textContent = s;
     }
     { // the giant's bar: it fills once when the bout begins, and goes when the giant does
-      const on = giant.awake && giant.alive && giant.mode !== 'rise' && !ended, hpK = giant.hp / giant.hpMax;
+      const on = giant.awake && giant.alive && giant.mode !== 'rise' && !ended && barK < .35, hpK = giant.hp / giant.hpMax;   // (not under the black bars of a staged moment)
       bossK += ((on ? 1 : 0) - bossK) * Math.min(1, (on ? 3 : 1.6) * DT); bossFill = on ? Math.min(1, bossFill + DT / .9) : 0;
       bossLagV = hpK > bossLagV ? hpK : bossLagV + (hpK - bossLagV) * Math.min(1, (giant.hitT > 0 ? 0 : 2.2) * DT);
       bossBar.style.opacity = bossK.toFixed(3); const sh = giant.hitT > .25 ? (frame % 2 ? 3 : -3) : 0; bossBar.style.transform = `translateX(-50%) translate(${sh}px, 0)`;
@@ -594,6 +595,7 @@ async function boot() {
   window.__advance = async k => { for (let i = 0; i < k; i++) tick(); await device.queue.onSubmittedWorkDone(); return frame; };
   window.__probe = () => sim.probe();
   window.__sound = name => renderVoice(name); window.__voices = Object.keys(VOICES);
+  window.__tick = () => sound.tick; window.__audio = (from, to, tail) => renderLog(soundLog, from, to, tail);   // the sound of ticks from..to as a WAV (base64)
   // wall time per frame with the GPU drained each frame: sim + render, no vsync
   window.__bench = async k => { const t0 = performance.now(); for (let i = 0; i < k; i++) { tick(); await device.queue.onSubmittedWorkDone(); } return (performance.now() - t0) / k; };
   window.__state = () => ({ frame, ms, clock, hold, p: player.p, form: player.form, hp: player.hp, combo: player.combo,
@@ -602,7 +604,7 @@ async function boot() {
     hero: { ik: hero.ikW, feet: hero.feet.map(f => { const b = hero.B['foot' + f.k].getWorldPosition(tv); return { planted: f.t >= 1, x: b.x, y: b.y, z: b.z }; }) },
     boss: giant.mode, parts: giant.parts, target: giant.target, planted: giant.planted && giant.fall >= 1 && giant.ik >= 1, side: giant.side,
     foot: giant.parts ? ['footL', 'footR'].map(k => giant.parts[k][1] - height(giant.parts[k][0], giant.parts[k][2])) : null });
-  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; } if (o.ratio) { ratio = o.ratio; renderer.setPixelRatio(ratio); } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
+  window.__set = o => { if (o.view) { view = o.view; fog.use(view); } if (o.slice != null) fog.u.slice.value = o.slice; if (o.sliceV != null) fog.u.sliceV.value = o.sliceV; if (o.form != null) player.setForm(o.form); if (o.timing != null) timing = o.timing; if (o.hud === false) { hud.style.display = 'none'; skipHint.style.display = 'none'; } if (o.ratio) { ratio = o.ratio; renderer.setPixelRatio(ratio); } if (o.clear != null) { fog.u.smoke.value = o.clear ? 0 : 1; fog.u.kFog.value = o.clear ? 0 : .13; fog.u.wisp.value = o.clear ? 0 : .85; } };
   if (q.has('manual')) { tick(); window.__done = true; return; }
   // The game advances in steps of 1/60 s; a display need not call at that rate. A 120 Hz one calls twice as often, a
   // heavy picture less often. So the time that has really passed is banked and spent in whole steps: none on a call that

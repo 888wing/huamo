@@ -716,6 +716,40 @@ slam 11). `check-spar.mjs` and `check-boss.mjs` default to `dist/index.html`: pa
 default build the procedural one and adding `--photo-smoke`). This round was committed from a separate worktree with
 only its own files, and the README was left alone: `tools/realtime.mjs` and `tools/cost.mjs` are not listed there yet.
 
+## Round 30 (2026-11-16): a 60-second reel, with the game's own sound
+
+The owner asked for a 60-second gameplay video to post on X.
+
+- **Sound for stepped captures.** `createSound(muted, log)` writes every sound into `log` as `[tick, name, options]`
+  whether or not an audio device is running (a tick is one call of `frame()`), and `renderLog(log, from, to, tail)`
+  renders that stretch through the same mixer on an `OfflineAudioContext` and returns a WAV. One tick is one captured
+  picture, so picture and sound cannot drift. In `?manual` mode the page keeps the log; `__tick()` and
+  `__audio(from, to, tail)` expose it. The drum and the plucked notes now keep time whether or not sound is playing.
+- **`tools/reel.mjs <edit list> <out base> [--draft] [--join]`** cuts a reel from scripted runs: each shot is a stretch
+  of one run (`q`, `from`, `dur`, optional fades from and to paper), captured tick by tick at 60 fps with its sound;
+  the shots are joined, an end card is photographed from a small page, loudness is set with one fixed gain and a
+  ceiling, and three files are written: a 1080p master, the same without sound, and a 720p copy under 30 MiB.
+  `--draft` is half size at 30 fps for choosing cuts; `--join` reuses captured shots.
+- **`tools/reel-x.json`** is the cut that was delivered: a flash of the crane's kill, the path and the first duel, the
+  blade parting the smoke, a second duel in the reeds, the tiger and the crane, in through the curtain and the giant's
+  entrance, five stretches of the bout, the fall, the carp's leap, the tiger's kill, the giant coming down, the band,
+  the card. 17 shots and the card, 60.00 s.
+- The giant's bar is not drawn under the black bars of a staged moment (its name showed there, dark on black), and
+  `__set({ hud: false })` also hides the hint for skipping the entrance.
+
+Result: 1920x1080 at 60 fps, 3600 frames, 106 MiB (capped at 16 Mbit/s); 1280x720 copy 28.1 MiB. Sound as rendered
+-23.1 LUFS, delivered at -17.5 LUFS with a true peak of -1.6 dBFS.
+
+Choosing shots: with the default fog the transformations of `?demo=shift` cannot be seen (small bodies, far camera),
+so the beasts are shown from `?demo=beasts` and from the endings. Several stretches of the bout have a pine or a trunk
+across the lens (the camera stands among the trees round the clearing); the cut avoids them, the game does not.
+
+Not verified: **nobody has heard the sound**, in the game or in the reel; only levels were measured. The picture was
+checked from contact sheets and single frames, not watched in motion.
+
+Other sessions' files in the checkout on 2026-11-16, left untouched and not committed here: `unreal/`, `tools/ue-*`,
+and the uncommitted `build.mjs` and `README.md`.
+
 ## Current state
 
 `dist/index.html`: **854.5 KB raw, 238.1 KB gzip, 193.3 KB brotli** (three.js 811.8 KB raw, own code 42.2 KB raw).

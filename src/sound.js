@@ -66,35 +66,62 @@ export const VOICES = {
 };
 const SCALE = [146.83, 174.61, 196, 220, 261.63, 293.66]; // a few notes of a pentatonic scale, low
 
-export function createSound(muted = false) {
-  let ctx = null, out = null, bed = null, bedF = null, wait = 4, n = 0, beat = 0, step = 0;
-  const start = () => {
-    if (muted) return; if (ctx) { ctx.resume(); return; }
-    ctx = new AudioContext(); const master = ctx.createGain(), comp = ctx.createDynamicsCompressor(), verb = ctx.createConvolver(), send = ctx.createGain();
-    // a room: two seconds of noise dying away
-    const ir = ctx.createBuffer(2, ctx.sampleRate * 2, ctx.sampleRate); for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); let s = 777 + ch; for (let i = 0; i < d.length; i++) { s = (s * 16807) % 2147483647; d[i] = (s / 1073741823.5 - 1) * Math.exp(-i / (ctx.sampleRate * .45)); } }
-    verb.buffer = ir; send.gain.value = .28; master.gain.value = .8; out = ctx.createGain();
-    out.connect(comp); out.connect(send).connect(verb).connect(comp); comp.connect(master).connect(ctx.destination);
-    // the air: wind through reeds, always there, louder with speed
-    const src = ctx.createBufferSource(); src.buffer = noiseOf(ctx); src.loop = true; bedF = ctx.createBiquadFilter(); bedF.type = 'bandpass'; bedF.frequency.value = 380; bedF.Q.value = .5; bed = ctx.createGain(); bed.gain.value = .02;
-    src.connect(bedF).connect(bed).connect(out); src.start();
-  };
+// the mix every voice goes into: a compressor, a generated room, and the bed of wind. Built on whatever context it is given
+function mixer(ctx) {
+  const master = ctx.createGain(), comp = ctx.createDynamicsCompressor(), verb = ctx.createConvolver(), send = ctx.createGain(), out = ctx.createGain();
+  // a room: two seconds of noise dying away
+  const ir = ctx.createBuffer(2, ctx.sampleRate * 2, ctx.sampleRate); for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); let s = 777 + ch; for (let i = 0; i < d.length; i++) { s = (s * 16807) % 2147483647; d[i] = (s / 1073741823.5 - 1) * Math.exp(-i / (ctx.sampleRate * .45)); } }
+  verb.buffer = ir; send.gain.value = .28; master.gain.value = .8;
+  out.connect(comp); out.connect(send).connect(verb).connect(comp); comp.connect(master).connect(ctx.destination);
+  // the air: wind through reeds, always there, louder with speed
+  const src = ctx.createBufferSource(), bedF = ctx.createBiquadFilter(), bed = ctx.createGain(); src.buffer = noiseOf(ctx); src.loop = true; bedF.type = 'bandpass'; bedF.frequency.value = 380; bedF.Q.value = .5; bed.gain.value = .02;
+  src.connect(bedF).connect(bed).connect(out); src.start();
+  return { out, bed, bedF };
+}
+
+// log: an array to write every sound into as [tick, name, options] (a tick is one call of frame()), whether or not anything
+// is playing: a run stepped by hand, with no audio device, can have its sound rendered afterwards by renderLog().
+export function createSound(muted = false, log = null) {
+  let ctx = null, out = null, bed = null, bedF = null, wait = 4, n = 0, beat = 0, step = 0, tick = 0;
+  const start = () => { if (muted) return; if (ctx) { ctx.resume(); return; } ctx = new AudioContext(); ({ out, bed, bedF } = mixer(ctx)); };
   addEventListener('pointerdown', start); addEventListener('keydown', start);
+  const live = () => !!ctx && ctx.state === 'running';
+  const voice = (name, o = {}) => { if (!VOICES[name]) return; log?.push([tick, name, o]); if (live()) VOICES[name](ctx, out, ctx.currentTime + .005, o); };
   return {
-    get on() { return !!ctx && ctx.state === 'running'; },
+    get on() { return live(); },
+    get tick() { return tick; },
     toggle() { muted = !muted; if (muted) ctx?.suspend(); else start(); return !muted; },
-    play(name, o = {}) { if (ctx && ctx.state === 'running' && VOICES[name]) VOICES[name](ctx, out, ctx.currentTime + .005, o); },
+    play: voice,
     // every frame: speed 0..1 of whatever the player is, whether the giant is up (the plucked notes stop for it), and
     // the bout's drum: 0 silent, 1 a slow figure, 2 faster and fuller once the giant is enraged
     frame(dt, speed, tense, drive = 0) {
-      if (!ctx || ctx.state !== 'running') return; const t = ctx.currentTime;
-      bed.gain.setTargetAtTime(.018 + .05 * speed, t, .3); bedF.frequency.setTargetAtTime(340 + 500 * speed, t, .4);
-      if ((wait -= dt) <= 0 && !tense) { wait = 5 + ((n * 7919) % 6); VOICES.pluck(ctx, out, t + .01, { f: SCALE[(n * 5 + (n >> 1)) % SCALE.length], g: .12 }); n++; }
+      tick++; if (log && tick % 6 === 0) log.push([tick, 'bed', { speed }]);
+      if (live()) { const t = ctx.currentTime; bed.gain.setTargetAtTime(.018 + .05 * speed, t, .3); bedF.frequency.setTargetAtTime(340 + 500 * speed, t, .4); }
+      if ((wait -= dt) <= 0 && !tense) { wait = 5 + ((n * 7919) % 6); voice('pluck', { f: SCALE[(n * 5 + (n >> 1)) % SCALE.length], g: .12 }); n++; }
       if (!drive) { beat = 0; step = 0; return; }
       const fig = drive > 1 ? [1, 0, .5, 1, 0, .5, 1, .5] : [1, 0, 0, .5, 0, 0, 1, 0];
-      if ((beat -= dt) <= 0) { beat += drive > 1 ? .2 : .29; const k = fig[step % 8]; if (k) VOICES.taiko(ctx, out, t + .01, { k: .5 * k + .12 }); if (step % 4 === 2) VOICES.rim(ctx, out, t + .01, { k: drive > 1 ? .7 : .45 }); step++; }
+      if ((beat -= dt) <= 0) { beat += drive > 1 ? .2 : .29; const k = fig[step % 8]; if (k) voice('taiko', { k: .5 * k + .12 }); if (step % 4 === 2) voice('rim', { k: drive > 1 ? .7 : .45 }); step++; }
     },
   };
+}
+// What a log sounded like between two ticks, rendered without an audio device: one tick is 1/60 s, so a picture made by
+// stepping the same run frame by frame and this sound cannot drift apart. `tail` seconds are added for what rings on.
+// Three seconds before `from` are rendered too and thrown away, so that what was already sounding is there.
+// Returns a WAV file (stereo, 16 bit, 48 kHz) as base64.
+export async function renderLog(log, from, to, tail = 0) {
+  const sr = 48000, pre = 180, t0 = from - pre, ctx = new OfflineAudioContext(2, Math.ceil(((to - t0) / 60 + tail) * sr), sr), { out, bed, bedF } = mixer(ctx);
+  for (const [tk, name, o] of log) {
+    if (tk < t0 || tk >= to) continue; const t = Math.max(0, (tk - t0) / 60) + .005;
+    if (name === 'bed') { bed.gain.setTargetAtTime(.018 + .05 * o.speed, t, .3); bedF.frequency.setTargetAtTime(340 + 500 * o.speed, t, .4); }
+    else VOICES[name](ctx, out, t, o);
+  }
+  const buf = await ctx.startRendering(), skip = pre / 60 * sr, len = buf.length - skip, L = buf.getChannelData(0), R = buf.getChannelData(1);
+  const wav = new DataView(new ArrayBuffer(44 + len * 4)), put = (at, text) => { for (let i = 0; i < text.length; i++) wav.setUint8(at + i, text.charCodeAt(i)); };
+  put(0, 'RIFF'); wav.setUint32(4, 36 + len * 4, true); put(8, 'WAVEfmt '); wav.setUint32(16, 16, true); wav.setUint16(20, 1, true); wav.setUint16(22, 2, true); wav.setUint32(24, sr, true); wav.setUint32(28, sr * 4, true); wav.setUint16(32, 4, true); wav.setUint16(34, 16, true); put(36, 'data'); wav.setUint32(40, len * 4, true);
+  let peak = 0;
+  for (let i = 0; i < len; i++) { const l = L[skip + i], r = R[skip + i]; peak = Math.max(peak, Math.abs(l), Math.abs(r)); wav.setInt16(44 + i * 4, Math.max(-1, Math.min(1, l)) * 32767, true); wav.setInt16(46 + i * 4, Math.max(-1, Math.min(1, r)) * 32767, true); }
+  const bytes = new Uint8Array(wav.buffer); let bin = ''; for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+  return { wav: btoa(bin), peak, seconds: len / sr };
 }
 // Renders one voice offline and measures it: for checking that every voice makes sound and none clips.
 export async function renderVoice(name, o = {}) {
